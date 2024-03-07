@@ -94,7 +94,7 @@ const (
 	hasVoted = `SELECT resolution_id FROM ` + votingSchemaName + `.votes WHERE resolution_id = $1 AND voter_id = $2;`
 
 	// containsBody checks if a resolution has a body
-	containsBody = `SELECT body is not null FROM ` + votingSchemaName + `.resolutions WHERE id = $1;`
+	containsBody = `SELECT body IS NOT NULL FROM ` + votingSchemaName + `.resolutions WHERE id = $1;`
 
 	// deleteResolutions deletes a set of resolutions
 	// it is meant to be used in formatResolutionList
@@ -134,7 +134,7 @@ const (
 	HAVING SUM(vr.power) >= $2
 	ORDER BY r.id;` // order by id for determinism. ids are unique in the result.
 
-	// GetResolutionsFullInfoByType gets the full info of a set of resolutions by type
+	// getResolutionsFullInfoByType gets the full info of a set of resolutions by type
 	getResolutionsFullInfoByType = `
 	SELECT r.id AS id, r.body AS body, t.name AS type, r.expiration AS expiration,
 		SUM(vr.power) AS approved_power, ARRAY_AGG(int8send(vr.power) || vr.name ORDER BY vr.id) AS voters,
@@ -176,7 +176,8 @@ const (
 	GROUP BY r.id, r.body, t.name, r.expiration, r.vote_body_proposer, r.extra_vote_id
 	ORDER BY r.id;` // order by not necessary since only one result?
 
-	allVoters                      = `SELECT name, power FROM ` + votingSchemaName + `.voters;`
+	allVoters = `SELECT name, power FROM ` + votingSchemaName + `.voters;`
+
 	getResolutionByTypeAndProposer = `SELECT r.id FROM ` + votingSchemaName + `.resolutions AS r
 	INNER JOIN ` + votingSchemaName + `.resolution_types AS t ON r.type = t.id
 	WHERE t.name = $1 AND vote_body_proposer = $2

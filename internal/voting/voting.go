@@ -19,7 +19,7 @@ const (
 
 // InitializeVoteStore initializes the vote store with the required tables.
 // It will also create any resolution types that have been registered.
-func InitializeVoteStore(ctx context.Context, db sql.DB) error {
+func InitializeVoteStore(ctx context.Context, db sql.TxMaker) error {
 	tx, err := db.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -61,7 +61,7 @@ func InitializeVoteStore(ctx context.Context, db sql.DB) error {
 // If the voter does not exist, an error will be returned.
 // If the voter has already approved the resolution, no error will be returned.
 // If the resolution has already been processed, no error will be returned.
-func ApproveResolution(ctx context.Context, db sql.DB, resolutionID types.UUID, expiration int64, from []byte) error {
+func ApproveResolution(ctx context.Context, db sql.TxMaker, resolutionID types.UUID, expiration int64, from []byte) error {
 	tx, err := db.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -95,10 +95,10 @@ func ApproveResolution(ctx context.Context, db sql.DB, resolutionID types.UUID, 
 }
 
 // CreateResolution creates a vote, by submitting a body of a vote, a topic
-// and an expiration.  The expiration should be a blockheight.
+// and an expiration.  The expiration should be a block height.
 // If the resolution already exists, it will not be changed.
 // If the resolution was already processed, nothing will happen.
-func CreateResolution(ctx context.Context, db sql.DB, event *types.VotableEvent, expiration int64, voteBodyProposer []byte) error {
+func CreateResolution(ctx context.Context, db sql.TxMaker, event *types.VotableEvent, expiration int64, voteBodyProposer []byte) error {
 	tx, err := db.BeginTx(ctx)
 	if err != nil {
 		return err
@@ -140,6 +140,35 @@ func CreateResolution(ctx context.Context, db sql.DB, event *types.VotableEvent,
 	}
 
 	return tx.Commit(ctx)
+}
+
+// TODO: test fromRow by itself
+func toRow(res *resolutions.Resolution) []any {
+	row := make([]any, 8)
+
+	row[0] = res.ID[:]
+	row[1] = res.Body
+	row[2] = res.Type
+	row[3] = res.ExpirationHeight
+	if res.ApprovedPower == 0 {
+		row[4] = nil
+	} else {
+		row[4] = res.ApprovedPower
+	}
+
+	votersRow := make([]any, len(res.Voters))
+	for i, voter := range res.Voters {
+		var voterBts []byte
+		voterBts = binary.BigEndian.AppendUint64(voterBts, uint64(voter.Power))
+		voterBts = append(voterBts, voter.PubKey...)
+		votersRow[i] = voterBts
+	}
+	row[5] = votersRow
+
+	row[6] = res.Proposer
+	row[7] = res.DoubleProposerVote
+
+	return row
 }
 
 // fromRow converts a row from the database into a resolutions.Resolution
@@ -216,7 +245,7 @@ func fromRow(row []any) (*resolutions.Resolution, error) {
 		var num uint64
 		err := binary.Read(bytes.NewReader(voterBts[:8]), binary.BigEndian, &num)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read bigendian int64 from voter: %w", err)
+			return nil, fmt.Errorf("failed to read big endian int64 from voter: %w", err)
 		}
 
 		v.Voters = append(v.Voters, &types.Validator{
@@ -243,7 +272,7 @@ func fromRow(row []any) (*resolutions.Resolution, error) {
 }
 
 // GetResolutionInfo gets a resolution, identified by the ID.
-func GetResolutionInfo(ctx context.Context, db sql.DB, id types.UUID) (*resolutions.Resolution, error) {
+func GetResolutionInfo(ctx context.Context, db sql.Executor, id types.UUID) (*resolutions.Resolution, error) {
 	res, err := db.Execute(ctx, getFullResolutionInfo, id[:])
 	if err != nil {
 		return nil, err
@@ -261,9 +290,9 @@ func GetResolutionInfo(ctx context.Context, db sql.DB, id types.UUID) (*resoluti
 }
 
 // GetExpired returns all resolutions with an expiration
-// less than or equal to the given blockheight.
-func GetExpired(ctx context.Context, db sql.DB, blockheight int64) ([]*resolutions.Resolution, error) {
-	res, err := db.Execute(ctx, getResolutionsFullInfoByExpiration, blockheight)
+// less than or equal to the given block height.
+func GetExpired(ctx context.Context, db sql.Executor, blockHeight int64) ([]*resolutions.Resolution, error) {
+	res, err := db.Execute(ctx, getResolutionsFullInfoByExpiration, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -272,7 +301,7 @@ func GetExpired(ctx context.Context, db sql.DB, blockheight int64) ([]*resolutio
 	for i, row := range res.Rows {
 		ids[i], err = fromRow(row)
 		if err != nil {
-			return nil, fmt.Errorf("internal bug: %w", err)
+			return nil, fmt.Errorf("invalid vote resolution row: %w", err)
 		}
 	}
 
@@ -280,7 +309,7 @@ func GetExpired(ctx context.Context, db sql.DB, blockheight int64) ([]*resolutio
 }
 
 // GetResolutionsByThresholdAndType gets all resolutions that have reached the threshold of votes and are of a specific type.
-func GetResolutionsByThresholdAndType(ctx context.Context, db sql.DB, threshold *big.Rat, resType string) ([]*resolutions.Resolution, error) {
+func GetResolutionsByThresholdAndType(ctx context.Context, db sql.TxMaker, threshold *big.Rat, resType string) ([]*resolutions.Resolution, error) {
 	tx, err := db.BeginTx(ctx)
 	if err != nil {
 		return nil, err
@@ -309,7 +338,7 @@ func GetResolutionsByThresholdAndType(ctx context.Context, db sql.DB, threshold 
 }
 
 // GetResolutionsByType gets all resolutions of a specific type.
-func GetResolutionsByType(ctx context.Context, db sql.DB, resType string) ([]*resolutions.Resolution, error) {
+func GetResolutionsByType(ctx context.Context, db sql.Executor, resType string) ([]*resolutions.Resolution, error) {
 	res, err := db.Execute(ctx, getResolutionsFullInfoByType, resType)
 	if err != nil {
 		return nil, err
@@ -329,19 +358,19 @@ func GetResolutionsByType(ctx context.Context, db sql.DB, resType string) ([]*re
 
 // DeleteResolutions deletes a slice of resolution IDs from the database.
 // It will mark the resolutions as processed in the processed table.
-func DeleteResolutions(ctx context.Context, db sql.DB, ids ...types.UUID) error {
+func DeleteResolutions(ctx context.Context, db sql.Executor, ids ...types.UUID) error {
 	_, err := db.Execute(ctx, deleteResolutions, types.UUIDArray(ids))
 	return err
 }
 
 // MarkProcessed marks a set of resolutions as processed.
-func MarkProcessed(ctx context.Context, db sql.DB, ids ...types.UUID) error {
+func MarkProcessed(ctx context.Context, db sql.Executor, ids ...types.UUID) error {
 	_, err := db.Execute(ctx, markManyProcessed, types.UUIDArray(ids))
 	return err
 }
 
 // ResolutionContainsBody returns true if the resolution has a body.
-func ResolutionContainsBody(ctx context.Context, db sql.DB, id types.UUID) (bool, error) {
+func ResolutionContainsBody(ctx context.Context, db sql.Executor, id types.UUID) (bool, error) {
 	res, err := db.Execute(ctx, containsBody, id[:])
 	if err != nil {
 		return false, err
@@ -364,7 +393,7 @@ func ResolutionContainsBody(ctx context.Context, db sql.DB, id types.UUID) (bool
 }
 
 // IsProcessed checks if a vote has been marked as processed.
-func IsProcessed(ctx context.Context, tx sql.DB, resolutionID types.UUID) (bool, error) {
+func IsProcessed(ctx context.Context, tx sql.Executor, resolutionID types.UUID) (bool, error) {
 	res, err := tx.Execute(ctx, alreadyProcessed, resolutionID[:])
 	if err != nil {
 		return false, err
@@ -374,7 +403,7 @@ func IsProcessed(ctx context.Context, tx sql.DB, resolutionID types.UUID) (bool,
 }
 
 // HasVoted checks if a voter has voted on a resolution.
-func HasVoted(ctx context.Context, tx sql.DB, resolutionID types.UUID, from []byte) (bool, error) {
+func HasVoted(ctx context.Context, tx sql.Executor, resolutionID types.UUID, from []byte) (bool, error) {
 	userId := types.NewUUIDV5(from)
 
 	res, err := tx.Execute(ctx, hasVoted, resolutionID[:], userId[:])
@@ -387,7 +416,7 @@ func HasVoted(ctx context.Context, tx sql.DB, resolutionID types.UUID, from []by
 
 // GetValidatorPower gets the power of a voter.
 // If the voter does not exist, it will return 0.
-func GetValidatorPower(ctx context.Context, db sql.DB, identifier []byte) (power int64, err error) {
+func GetValidatorPower(ctx context.Context, db sql.TxMaker, identifier []byte) (power int64, err error) {
 	tx, err := db.BeginTx(ctx)
 	if err != nil {
 		return 0, err
@@ -420,7 +449,7 @@ func GetValidatorPower(ctx context.Context, db sql.DB, identifier []byte) (power
 }
 
 // GetValidators gets all voters in the vote store, along with their power.
-func GetValidators(ctx context.Context, db sql.DB) ([]*types.Validator, error) {
+func GetValidators(ctx context.Context, db sql.Executor) ([]*types.Validator, error) {
 	res, err := db.Execute(ctx, allVoters)
 	if err != nil {
 		return nil, err
@@ -463,7 +492,7 @@ func GetValidators(ctx context.Context, db sql.DB) ([]*types.Validator, error) {
 // It will create the voter if it does not exist.
 // It will return an error if a negative power is given.
 // If set to 0, the voter will be deleted.
-func SetValidatorPower(ctx context.Context, db sql.DB, recipient []byte, power int64) error {
+func SetValidatorPower(ctx context.Context, db sql.Executor, recipient []byte, power int64) error {
 	if power < 0 {
 		return fmt.Errorf("cannot set a negative power")
 	}
@@ -480,7 +509,7 @@ func SetValidatorPower(ctx context.Context, db sql.DB, recipient []byte, power i
 }
 
 // RequiredPower gets the required power to meet the threshold requirements.
-func RequiredPower(ctx context.Context, db sql.DB, threshold *big.Rat) (int64, error) {
+func RequiredPower(ctx context.Context, db sql.Executor, threshold *big.Rat) (int64, error) {
 	numerator := threshold.Num().Int64()
 	denominator := threshold.Denom().Int64()
 
@@ -514,7 +543,7 @@ func RequiredPower(ctx context.Context, db sql.DB, threshold *big.Rat) (int64, e
 }
 
 // GetResolutionIDsByTypeAndProposer gets all resolution ids of a specific type and the body proposer.
-func GetResolutionIDsByTypeAndProposer(ctx context.Context, db sql.DB, resType string, proposer []byte) ([]types.UUID, error) {
+func GetResolutionIDsByTypeAndProposer(ctx context.Context, db sql.Executor, resType string, proposer []byte) ([]types.UUID, error) {
 	res, err := db.Execute(ctx, getResolutionByTypeAndProposer, resType, proposer)
 	if err != nil {
 		return nil, err
