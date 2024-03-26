@@ -38,8 +38,12 @@ func (e *ExecutionContext) registerCsv(name string, filepath string) {
 	e.tables[name] = e.csv(name, filepath)
 }
 
-func (e *ExecutionContext) execute(df logical_plan.DataFrameAPI) *datasource.Result {
-	return execute(df.LogicalPlan())
+func (e *ExecutionContext) execute(plan logical_plan.LogicalPlan) *datasource.Result {
+	return execute(plan)
+}
+
+func (e *ExecutionContext) estimate(plan logical_plan.LogicalPlan) float64 {
+	return estimate(plan)
 }
 
 func execute(plan logical_plan.LogicalPlan) *datasource.Result {
@@ -60,4 +64,12 @@ func execute(plan logical_plan.LogicalPlan) *datasource.Result {
 	//fmt.Println(Format(vp, 0))
 	//
 	return vp.Execute()
+}
+
+func extimate(plan logical_plan.LogicalPlan) float64 {
+	r := &optimizer.ProjectionRule{}
+	optPlan := r.Optimize(plan)
+	qp := NewPlanner()
+	vp := qp.ToPlan(optPlan)
+	return vp.Estimate()
 }
