@@ -40,7 +40,7 @@ func (ds *CsvDataSource) load() error {
 	}
 
 	columnTypes := make([]string, len(header))
-	columnTypesInfered := false
+	columnTypesInferred := false
 
 	for {
 		columns, err := r.Read()
@@ -54,7 +54,7 @@ func (ds *CsvDataSource) load() error {
 		newRow := make(Row, len(header))
 		for i, col := range columns {
 			colType, colValue := colTypeCast(col)
-			if columnTypesInfered {
+			if columnTypesInferred {
 				// check if the column type is consistent
 				if columnTypes[i] != colType {
 					return fmt.Errorf("inconsistent column type at column %d, got %s, want %s",
@@ -69,7 +69,7 @@ func (ds *CsvDataSource) load() error {
 
 		ds.records = append(ds.records, newRow)
 
-		columnTypesInfered = true
+		columnTypesInferred = true
 	}
 
 	for i, name := range header {
@@ -77,7 +77,8 @@ func (ds *CsvDataSource) load() error {
 			datatypes.Field{Name: name, Type: columnTypes[i]})
 	}
 
-	slices.Clip(ds.schema.Fields)
+	ds.records = slices.Clip(ds.records)
+	ds.schema.Fields = slices.Clip(ds.schema.Fields)
 
 	return nil
 }

@@ -25,15 +25,15 @@ func (e *VLiteralStringExpr) evaluate(_ datasource.Row) datasource.ColumnValue {
 	return datasource.NewLiteralColumnValue(e.value)
 }
 
-type VLiteralNumericxpr struct {
+type VLiteralNumericExpr struct {
 	value int64
 }
 
-func (e *VLiteralNumericxpr) Resolve(_ VirtualPlan) string {
+func (e *VLiteralNumericExpr) Resolve(_ VirtualPlan) string {
 	return fmt.Sprintf("%d", e.value)
 }
 
-func (e *VLiteralNumericxpr) evaluate(_ datasource.Row) datasource.ColumnValue {
+func (e *VLiteralNumericExpr) evaluate(_ datasource.Row) datasource.ColumnValue {
 	return datasource.NewLiteralColumnValue(e.value)
 }
 
