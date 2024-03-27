@@ -14,5 +14,11 @@ type ColumnStatistic struct {
 	Max           string
 	DistinctCount int64
 	AvgSize       int64
-	Histogram     []HistogramBucket
+
+	// without histogram, we can make uniformity assumption to simplify the cost model
+	//Histogram     []HistogramBucket
+}
+
+func (s *Statistics) ColStat(index int) *ColumnStatistic {
+	return &s.ColumnStatistics[index]
 }

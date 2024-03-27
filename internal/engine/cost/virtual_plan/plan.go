@@ -17,6 +17,7 @@ type VirtualPlan interface {
 
 	Execute() *datasource.Result
 	Statistics() *datatypes.Statistics
+	Cost() int64
 }
 
 func Format(plan VirtualPlan, indent int) string {

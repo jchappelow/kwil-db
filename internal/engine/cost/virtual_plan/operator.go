@@ -29,6 +29,14 @@ func (s *VScanOp) Execute() *ds.Result {
 	return s.ds.Scan(s.projection...)
 }
 
+func (s *VScanOp) Statistics() *datatypes.Statistics {
+	return &datatypes.Statistics{}
+}
+
+func (s *VScanOp) Cost() int64 {
+	return 0
+}
+
 func VScan(datasource ds.SchemaSource, projection ...string) VirtualPlan {
 	ds := ds.SchemaSourceToDataSource(datasource)
 	return &VScanOp{ds: ds, projection: projection}
@@ -82,6 +90,14 @@ func (p *VProjectionOp) Execute() *ds.Result {
 	return ds.ResultFromStream(p.schema, out)
 }
 
+func (p *VProjectionOp) Statistics() *datatypes.Statistics {
+	return p.input.Statistics()
+}
+
+func (p *VProjectionOp) Cost() int64 {
+	return p.input.Cost()
+}
+
 func VProjection(input VirtualPlan, schema *datatypes.Schema, exprs ...VirtualExpr) VirtualPlan {
 	return &VProjectionOp{input: input, exprs: exprs, schema: schema}
 }
@@ -125,6 +141,14 @@ func (s *VSelectionOp) Execute() *ds.Result {
 	}()
 
 	return ds.ResultFromStream(s.input.Schema(), out)
+}
+
+func (s *VSelectionOp) Statistics() *datatypes.Statistics {
+	return s.input.Statistics()
+}
+
+func (s *VSelectionOp) Cost() int64 {
+	return s.input.Cost()
 }
 
 func VSelection(input VirtualPlan, expr VirtualExpr) VirtualPlan {
