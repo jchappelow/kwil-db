@@ -157,7 +157,7 @@ func smap[T any](ctx context.Context, in <-chan T, fn func(T) T) <-chan T {
 }
 
 // transform applies a function to each element in the input channel
-func transform[I any, O any](ctx context.Context, in <-chan I, fn func(I) O) <-chan O {
+func transform[I, O any](ctx context.Context, in <-chan I, fn func(I) O) <-chan O {
 	out := make(chan O)
 	go func() {
 		defer close(out)
@@ -225,47 +225,46 @@ func (s SAI[T]) Collect(ctx context.Context) []T {
 	}
 }
 
-//// SteamingAPI defines a streaming API.
-//type SteamingAPI[I any, O any] interface {
-//	//Transform(ctx context.Context, fn func(I) O) SteamingAPI[I, O]
-//	//Map(ctx context.Context, fn func(I) I) SteamingAPI[I, O]
-//	//Filter(ctx context.Context, fn func(I) bool) SteamingAPI[I, O]
-//	Collect(ctx context.Context) []I
-//}
-//
-//// SAI is a StreamingApi Implementation.
-//type SAI[I any, O any] struct {
-//	dataIn <-chan I
-//}
-//
-//func Tap[I any, O any](ctx context.Context, in []I) SteamingAPI[I, O] {
-//	return &SAI[I, O]{dataIn: tap(ctx, in)}
-//}
-//
-////func (s *SAI[I any, O any]) Transform(ctx context.Context, fn func(I) O) SteamingAPI[I, O] {
-////	return &SAI[I,O]{dataIn: transform(ctx, s.dataIn, fn)}
-////}
-////
-////
-////func (s *SAI[I any, O any]) Map(ctx context.Context, fn func(I) I) SteamingAPI[I, O] {
-////	return &SAI[I,O]{dataIn: smap(ctx, s.dataIn, fn)}
-////}
-//
-////func (s *SAI[I any, O any]) Filter(ctx context.Context, fn func(I) bool) SteamingAPI[I, O] {
-////	return &SAI[I, O]{dataIn: filter(ctx, s.dataIn, fn)}
-////}
-//
-//func (s SAI[I any, O any]) Collect(ctx context.Context) []I {
-//	var out []I
-//	for {
-//		select {
-//		case <-ctx.Done():
-//			return out
-//		case v, ok := <-s.dataIn:
-//			if !ok {
-//				return out
-//			}
-//			out = append(out, v)
-//		}
-//	}
-//}
+// SteamingAPI defines a streaming API.
+type SteamingAPI2[I, O any] interface {
+	//Transform(ctx context.Context, fn func(I) O) SteamingAPI2[I, O]
+	Map(ctx context.Context, fn func(I) I) SteamingAPI2[I, O]
+	Filter(ctx context.Context, fn func(I) bool) SteamingAPI2[I, O]
+	Collect(ctx context.Context) []I
+}
+
+// SAI is a StreamingApi Implementation.
+type SAI2[I, O any] struct {
+	dataIn <-chan I
+}
+
+func Tap2[I, O any](ctx context.Context, in []I) SteamingAPI2[I, O] {
+	return &SAI2[I, O]{dataIn: tap(ctx, in)}
+}
+
+func (s *SAI2[I, O]) Transform(ctx context.Context, fn func(I) O) SteamingAPI2[I, O] {
+	return &SAI2[I, O]{dataIn: transform(ctx, s.dataIn, fn)}
+}
+
+func (s *SAI2[I, O]) Map(ctx context.Context, fn func(I) I) SteamingAPI2[I, O] {
+	return &SAI2[I, O]{dataIn: smap(ctx, s.dataIn, fn)}
+}
+
+func (s *SAI2[I, O]) Filter(ctx context.Context, fn func(I) bool) SteamingAPI2[I, O] {
+	return &SAI2[I, O]{dataIn: filter(ctx, s.dataIn, fn)}
+}
+
+func (s *SAI2[I, O]) Collect(ctx context.Context) []I {
+	var out []I
+	for {
+		select {
+		case <-ctx.Done():
+			return out
+		case v, ok := <-s.dataIn:
+			if !ok {
+				return out
+			}
+			out = append(out, v)
+		}
+	}
+}
