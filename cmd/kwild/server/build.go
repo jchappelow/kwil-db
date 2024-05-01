@@ -207,10 +207,11 @@ func buildServer(d *coreDependencies, closers *closeFuncs) *Server {
 
 	jsonRPCTxSvc := rpcserver.NewService(db, e, wrappedCmtClient, txApp, d.log)
 	jsonRPCserver, err := rpcserver.NewServer(d.cfg.AppCfg.JSONRPCListenAddress,
-		*d.log.Named("jsonrpcserver"), jsonRPCTxSvc)
+		*d.log.Named("jsonrpcserver"))
 	if err != nil {
-		failBuild(err, "unable to start json-rpc server")
+		failBuild(err, "unable to create json-rpc server")
 	}
+	jsonRPCserver.RegisterSvc(jsonRPCTxSvc)
 
 	// tx service and grpc server
 	txsvc := buildTxSvc(d, db, e, wrappedCmtClient, txApp)

@@ -20,14 +20,9 @@ var logger log.Logger
 
 // Server is a JSON-RPC server for the Kwil "tx" service.
 type Server struct {
-	srv *http.Server
-	log log.Logger
-	svc TxSvc
-	// TODO: maybe separate the HTTP serving pieces from the dispatching to
-	// service methods. Instead of depending on a TxSvc, have externally
-	// registered method handlers that use the service.
-
-	// methodHandlers map[jsonrpc.Method]MethodHandler
+	srv            *http.Server
+	log            log.Logger
+	methodHandlers map[jsonrpc.Method]MethodHandler
 }
 
 type TxSvc interface {
@@ -45,7 +40,7 @@ type TxSvc interface {
 
 // NewServer creates a new JSON-RPC server. Presently this requires a TxSvc, but
 // it should switch to externally registered routes.
-func NewServer(addr string, log log.Logger, svc TxSvc) (*Server, error) {
+func NewServer(addr string, log log.Logger) (*Server, error) {
 	mux := http.NewServeMux() // http.DefaultServeMux has the pprof endpoints mounted
 	srv := &http.Server{
 		Addr:              addr,
@@ -56,9 +51,9 @@ func NewServer(addr string, log log.Logger, svc TxSvc) (*Server, error) {
 	}
 
 	s := &Server{
-		srv: srv,
-		log: log,
-		svc: svc,
+		srv:            srv,
+		log:            log,
+		methodHandlers: make(map[jsonrpc.Method]MethodHandler),
 	}
 
 	mux.Handle("/rpc/v1", http.HandlerFunc(s.handlerV1))
@@ -206,7 +201,7 @@ func (s *Server) handleRequest(ctx context.Context, req *jsonrpc.Request) *jsonr
 	s.log.Debug("handling request", log.String("method", req.Method))
 
 	// call the method with the params
-	result, rpcErr := handleMethod(ctx, s, jsonrpc.Method(req.Method), req.Params)
+	result, rpcErr := s.handleMethod(ctx, jsonrpc.Method(req.Method), req.Params)
 	if rpcErr != nil {
 		return jsonrpc.NewErrorResponse(req.ID, rpcErr)
 	}

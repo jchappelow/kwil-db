@@ -44,6 +44,53 @@ func NewService(db sql.ReadTxMaker, engine EngineReader,
 	}
 }
 
+var _ Svc = (*Service)(nil)
+
+func (svc *Service) Handlers() map[jsonrpc.Method]MethodHandler {
+	return map[jsonrpc.Method]MethodHandler{
+		jsonrpc.MethodAccount: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.AccountRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Account(ctx, req) }
+		},
+		jsonrpc.MethodBroadcast: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.BroadcastRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Broadcast(ctx, req) }
+		},
+		jsonrpc.MethodCall: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.CallRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Call(ctx, req) }
+		},
+		jsonrpc.MethodChainInfo: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.ChainInfoRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.ChainInfo(ctx, req) }
+		},
+		jsonrpc.MethodDatabases: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.ListDatabasesRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.ListDatabases(ctx, req) }
+		},
+		jsonrpc.MethodPing: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.PingRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Ping(ctx, req) }
+		},
+		jsonrpc.MethodPrice: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.EstimatePriceRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.EstimatePrice(ctx, req) }
+		},
+		jsonrpc.MethodQuery: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.QueryRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Query(ctx, req) }
+		},
+		jsonrpc.MethodSchema: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.SchemaRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.Schema(ctx, req) }
+		},
+		jsonrpc.MethodTxQuery: func(ctx context.Context, s *Server) (any, func() (any, *jsonrpc.Error)) {
+			req := &jsonrpc.TxQueryRequest{}
+			return req, func() (any, *jsonrpc.Error) { return svc.TxQuery(ctx, req) }
+		},
+	}
+}
+
 type EngineReader interface {
 	Procedure(ctx context.Context, tx sql.DB, options *common.ExecutionData) (*sql.ResultSet, error)
 	GetSchema(dbid string) (*types.Schema, error)
