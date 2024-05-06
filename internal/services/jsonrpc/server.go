@@ -39,6 +39,7 @@ func newServer(addr, path string, log log.Logger) (*Server, error) {
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
 	}
+	// here need to be able to listen on non-tcp e.g. unix
 
 	s := &Server{
 		srv:            srv,
