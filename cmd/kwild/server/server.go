@@ -30,10 +30,11 @@ import (
 
 // Server controls the gRPC server and http gateway.
 type Server struct {
-	grpcServer      *grpc.Server
-	jsonRPCserver   *rpcserver.Server
-	gateway         *gateway.GatewayServer
-	adminTPCServer  *grpc.Server
+	grpcServer         *grpc.Server
+	jsonRPCServer      *rpcserver.Server
+	jsonRPCAdminServer *rpcserver.Server
+	gateway            *gateway.GatewayServer
+	// adminTPCServer     *grpc.Server
 	cometBftNode    *cometbft.CometBftNode
 	listenerManager *listeners.ListenerManager
 	closers         *closeFuncs
@@ -178,8 +179,13 @@ func (s *Server) Start(ctx context.Context) error {
 	s.log.Info("grpc server started", zap.String("address", s.adminTPCServer.Addr()))
 
 	group.Go(func() error {
-		s.log.Info("starting json-rpc server", zap.String("address", s.cfg.AppCfg.JSONRPCListenAddress))
-		return s.jsonRPCserver.Serve(groupCtx)
+		s.log.Info("starting user json-rpc server", zap.String("address", s.cfg.AppCfg.JSONRPCListenAddress))
+		return s.jsonRPCServer.Serve(groupCtx)
+	})
+
+	group.Go(func() error {
+		s.log.Info("starting admin json-rpc server", zap.String("address", s.cfg.AppCfg.AdminListenAddress))
+		return s.jsonRPCAdminServer.Serve(groupCtx)
 	})
 
 	// Start listener manager only after node caught up

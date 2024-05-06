@@ -18,6 +18,8 @@ import (
 // application. For instance, "owner" would be friendlier as hexadecimal so that
 // it can look like an address if the signature type permits it (e.g. secp256k1).
 
+type VersionRequest struct{}
+
 // SchemaRequest contains the request parameters for MethodSchema.
 type SchemaRequest struct {
 	DBID string `json:"dbid,omitempty"`

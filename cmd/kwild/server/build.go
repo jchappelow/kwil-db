@@ -37,6 +37,8 @@ import (
 	healthcheck "github.com/kwilteam/kwil-db/internal/services/health"
 	simple_checker "github.com/kwilteam/kwil-db/internal/services/health/simple-checker"
 	rpcserver "github.com/kwilteam/kwil-db/internal/services/jsonrpc"
+	"github.com/kwilteam/kwil-db/internal/services/jsonrpc/adminsvc"
+	usersvc "github.com/kwilteam/kwil-db/internal/services/jsonrpc/usersvc"
 	"github.com/kwilteam/kwil-db/internal/sql/pg"
 	"github.com/kwilteam/kwil-db/internal/txapp"
 	"github.com/kwilteam/kwil-db/internal/voting"
@@ -205,26 +207,39 @@ func buildServer(d *coreDependencies, closers *closeFuncs) *Server {
 	// listener manager
 	listeners := buildListenerManager(d, ev, cometBftNode, txApp)
 
-	jsonRPCTxSvc := rpcserver.NewService(db, e, wrappedCmtClient, txApp, d.log)
-	jsonRPCserver, err := rpcserver.NewServer(d.cfg.AppCfg.JSONRPCListenAddress,
-		*d.log.Named("jsonrpcserver"))
+	jsonRPCTxSvc := usersvc.NewService(db, e, wrappedCmtClient, txApp,
+		*d.log.Named("user-json-svc"))
+	jsonRPCServer, err := rpcserver.NewServer(d.cfg.AppCfg.JSONRPCListenAddress,
+		*d.log.Named("user-jsonrpc-server"))
 	if err != nil {
 		failBuild(err, "unable to create json-rpc server")
 	}
-	jsonRPCserver.RegisterSvc(jsonRPCTxSvc)
+	jsonRPCServer.RegisterSvc(jsonRPCTxSvc)
+
+	signer := buildSigner(d)
+	jsonAdminSvc := adminsvc.NewService(db, wrappedCmtClient, txApp, signer, d.cfg,
+		d.genesisCfg.ChainID, *d.log.Named("admin-json-svc"))
+	jsonRPCAdminServer, err := rpcserver.NewServer(d.cfg.AppCfg.AdminListenAddress,
+		*d.log.Named("admin-jsonrpc-server"))
+	if err != nil {
+		failBuild(err, "unable to create json-rpc server")
+	}
+	jsonRPCAdminServer.RegisterSvc(jsonAdminSvc)
+	jsonRPCAdminServer.RegisterSvc(jsonRPCTxSvc)
 
 	// tx service and grpc server
 	txsvc := buildTxSvc(d, db, e, wrappedCmtClient, txApp)
 	grpcServer := buildGrpcServer(d, txsvc)
 
 	// admin service and server
-	admsvc := buildAdminSvc(d, db, wrappedCmtClient, txApp, abciApp.ChainID())
-	adminTCPServer := buildAdminService(d, closers, admsvc, txsvc)
+	// admsvc := buildAdminSvc(d, db, wrappedCmtClient, txApp, abciApp.ChainID())
+	// adminTCPServer := buildAdminService(d, closers, admsvc, txsvc)
 
 	return &Server{
-		grpcServer:      grpcServer,
-		jsonRPCserver:   jsonRPCserver,
-		adminTPCServer:  adminTCPServer,
+		grpcServer:         grpcServer,
+		jsonRPCServer:      jsonRPCServer,
+		jsonRPCAdminServer: jsonRPCAdminServer,
+		// adminTPCServer:     adminTCPServer,
 		gateway:         buildGatewayServer(d, grpcServer.Addr()),
 		cometBftNode:    cometBftNode,
 		listenerManager: listeners,

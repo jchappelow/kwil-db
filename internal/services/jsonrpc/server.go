@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"reflect"
 	"sync"
 	"time"
@@ -16,31 +17,20 @@ import (
 	jsonrpc "github.com/kwilteam/kwil-db/core/rpc/json"
 )
 
-var logger log.Logger
-
-// Server is a JSON-RPC server for the Kwil "tx" service.
+// Server is a JSON-RPC server.
 type Server struct {
 	srv            *http.Server
 	log            log.Logger
 	methodHandlers map[jsonrpc.Method]MethodHandler
 }
 
-type TxSvc interface {
-	ChainInfo(context.Context, *jsonrpc.ChainInfoRequest) (*jsonrpc.ChainInfoResponse, *jsonrpc.Error)
-	Broadcast(context.Context, *jsonrpc.BroadcastRequest) (*jsonrpc.BroadcastResponse, *jsonrpc.Error)
-	EstimatePrice(context.Context, *jsonrpc.EstimatePriceRequest) (*jsonrpc.EstimatePriceResponse, *jsonrpc.Error)
-	Query(context.Context, *jsonrpc.QueryRequest) (*jsonrpc.QueryResponse, *jsonrpc.Error)
-	Account(context.Context, *jsonrpc.AccountRequest) (*jsonrpc.AccountResponse, *jsonrpc.Error)
-	Ping(context.Context, *jsonrpc.PingRequest) (*jsonrpc.PingResponse, *jsonrpc.Error)
-	ListDatabases(context.Context, *jsonrpc.ListDatabasesRequest) (*jsonrpc.ListDatabasesResponse, *jsonrpc.Error)
-	Schema(context.Context, *jsonrpc.SchemaRequest) (*jsonrpc.SchemaResponse, *jsonrpc.Error)
-	Call(context.Context, *jsonrpc.CallRequest) (*jsonrpc.CallResponse, *jsonrpc.Error)
-	TxQuery(context.Context, *jsonrpc.TxQueryRequest) (*jsonrpc.TxQueryResponse, *jsonrpc.Error)
+// NewServer creates a new JSON-RPC server. Use RegisterMethodHandler or
+// RegisterSvc to add method handlers.
+func NewServer(addr string, log log.Logger) (*Server, error) {
+	return newServer(addr, "/rpc/v1", log)
 }
 
-// NewServer creates a new JSON-RPC server. Presently this requires a TxSvc, but
-// it should switch to externally registered routes.
-func NewServer(addr string, log log.Logger) (*Server, error) {
+func newServer(addr, path string, log log.Logger) (*Server, error) {
 	mux := http.NewServeMux() // http.DefaultServeMux has the pprof endpoints mounted
 	srv := &http.Server{
 		Addr:              addr,
@@ -56,9 +46,13 @@ func NewServer(addr string, log log.Logger) (*Server, error) {
 		methodHandlers: make(map[jsonrpc.Method]MethodHandler),
 	}
 
-	mux.Handle("/rpc/v1", http.HandlerFunc(s.handlerV1))
+	mux.Handle(path, http.HandlerFunc(s.handlerV1))
 
 	return s, nil
+}
+
+func NewServerURL(addr *url.URL, log log.Logger) (*Server, error) {
+	return newServer(addr.Host, addr.Path, log)
 }
 
 func (s *Server) Serve(ctx context.Context) error {

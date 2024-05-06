@@ -7,12 +7,28 @@ import (
 	jsonrpc "github.com/kwilteam/kwil-db/core/rpc/json"
 )
 
+// MethodHandler is a type of function that returns an interface containing a
+// pointer to a handler's input arguments, and a handler function that captures
+// the arguments pointer. The handler function returns its result type in an
+// interface, and a *jsonrpc.Error. A simple MethodHandler would instantiate a
+// new concrete instance of the parameters type and define a function that uses
+// that instance to perform some operations.
 type MethodHandler func(ctx context.Context, s *Server) (argsPtr any, handler func() (any, *jsonrpc.Error))
 
+// Svc is a type that enumerates it's handler functions by method name. To
+// handle a method, the Server:
+//  1. retrieves the MethodHandler associated with the method
+//  2. calls the MethodHandler to get the args interface and handler function
+//  3. unmarshals the inputs from a json.RawMessage into the args interface
+//  4. calls the handler function, returning the result and error
+//  5. marshal either the result or the Error into a Response
 type Svc interface {
 	Handlers() map[jsonrpc.Method]MethodHandler
 }
 
+// RegisterSvc registers every MethodHandler for a service.
+//
+// The Server's fixed endpoint is used.
 func (s *Server) RegisterSvc(svc Svc) {
 	for method, handler := range svc.Handlers() {
 		s.log.Infof("Registering method %q", method)
