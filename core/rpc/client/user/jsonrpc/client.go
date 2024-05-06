@@ -88,7 +88,9 @@ func (cl *Client) nextReqID() string {
 	return strconv.FormatUint(id, 10)
 }
 
-func (cl *Client) call(ctx context.Context, method string, cmd, res any) error {
+// NOTE: make a BaseClient with CallMethod only.
+
+func (cl *Client) CallMethod(ctx context.Context, method string, cmd, res any) error {
 	// res needs to be a pointer otherwise we can't unmarshal into it.
 	if rtp := reflect.TypeOf(res); rtp.Kind() != reflect.Ptr {
 		return errors.New("result must be a pointer")

@@ -21,7 +21,7 @@ func (cl *Client) Ping(ctx context.Context) (string, error) {
 		Message: "ping",
 	}
 	res := &jsonrpc.PingResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodPing), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodPing), cmd, res)
 	if err != nil {
 		return "", err
 	}
@@ -34,7 +34,7 @@ func (cl *Client) Broadcast(ctx context.Context, tx *transactions.Transaction, s
 		Sync: (*jsonrpc.BroadcastSync)(&sync),
 	}
 	res := &jsonrpc.BroadcastResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodBroadcast), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodBroadcast), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +75,7 @@ func (cl *Client) Call(ctx context.Context, msg *transactions.CallMessage, opts 
 		Sender:   msg.Sender,
 	}
 	res := &jsonrpc.CallResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodCall), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodCall), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +85,7 @@ func (cl *Client) Call(ctx context.Context, msg *transactions.CallMessage, opts 
 func (cl *Client) ChainInfo(ctx context.Context) (*types.ChainInfo, error) {
 	cmd := &jsonrpc.ChainInfoRequest{}
 	res := &jsonrpc.ChainInfoResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodChainInfo), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodChainInfo), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +98,7 @@ func (cl *Client) EstimateCost(ctx context.Context, tx *transactions.Transaction
 		Tx: tx,
 	}
 	res := &jsonrpc.EstimatePriceResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodPrice), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodPrice), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +118,7 @@ func (cl *Client) GetAccount(ctx context.Context, pubKey []byte, status types.Ac
 		Status:     &status,
 	}
 	res := &jsonrpc.AccountResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodAccount), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodAccount), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -147,7 +147,7 @@ func (cl *Client) GetSchema(ctx context.Context, dbid string) (*types.Schema, er
 		DBID: dbid,
 	}
 	res := &jsonrpc.SchemaResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodSchema), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodSchema), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -159,7 +159,7 @@ func (cl *Client) ListDatabases(ctx context.Context, ownerPubKey []byte) ([]*typ
 		Owner: ownerPubKey,
 	}
 	res := &jsonrpc.ListDatabasesResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodDatabases), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodDatabases), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +176,7 @@ func (cl *Client) Query(ctx context.Context, dbid, query string) ([]map[string]a
 		Query: query,
 	}
 	res := &jsonrpc.QueryResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodQuery), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodQuery), cmd, res)
 	if err != nil {
 		return nil, err
 	}
@@ -188,7 +188,7 @@ func (cl *Client) TxQuery(ctx context.Context, txHash []byte) (*transactions.TcT
 		TxHash: txHash,
 	}
 	res := &jsonrpc.TxQueryResponse{}
-	err := cl.call(ctx, string(jsonrpc.MethodTxQuery), cmd, res)
+	err := cl.CallMethod(ctx, string(jsonrpc.MethodTxQuery), cmd, res)
 	if err != nil {
 		return nil, err
 	}

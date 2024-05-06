@@ -153,9 +153,12 @@ func (svc *Service) Status(ctx context.Context, req *adminjson.StatusRequest) (*
 		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "node status unavailable", nil)
 	}
 	return &adminjson.StatusResponse{
-		Node:      status.Node,
-		Sync:      convertSyncInfo(status.Sync),
-		Validator: status.Validator,
+		Node: status.Node,
+		Sync: convertSyncInfo(status.Sync),
+		Validator: &adminjson.Validator{
+			PubKey: status.Validator.PubKey,
+			Power:  status.Validator.Power,
+		},
 	}, nil
 }
 

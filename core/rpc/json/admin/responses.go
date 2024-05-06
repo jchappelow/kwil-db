@@ -1,6 +1,9 @@
 package adminjson
 
-import adminTypes "github.com/kwilteam/kwil-db/core/types/admin"
+import (
+	"github.com/kwilteam/kwil-db/core/types"
+	adminTypes "github.com/kwilteam/kwil-db/core/types/admin"
+)
 
 // type StatusResponse = adminTypes.Status
 
@@ -13,7 +16,8 @@ type StatusResponse struct {
 type NodeInfo = adminTypes.NodeInfo
 
 // type SyncInfo = adminTypes.SyncInfo
-type Validator = adminTypes.ValidatorInfo
+// type Validator = adminTypes.ValidatorInfo
+type Validator = types.Validator
 
 // type NodeInfo struct {
 // 	ChainID         string `json:"chain_id,omitempty"`
@@ -55,13 +59,15 @@ type JoinStatusResponse struct {
 	JoinRequest *PendingJoin `json:"join_request,omitempty"`
 }
 
-type PendingJoin struct {
-	Candidate []byte   `json:"candidate,omitempty"`
-	Power     int64    `json:"power,omitempty"`
-	ExpiresAt int64    `json:"expires_at,omitempty"`
-	Board     [][]byte `json:"board,omitempty"`    // all validators
-	Approved  []bool   `json:"approved,omitempty"` // whether each validator has approved
-}
+type PendingJoin = types.JoinRequest
+
+// type PendingJoin struct {
+// 	Candidate []byte   `json:"candidate,omitempty"`
+// 	Power     int64    `json:"power,omitempty"`
+// 	ExpiresAt int64    `json:"expires_at,omitempty"`
+// 	Board     [][]byte `json:"board,omitempty"`    // all validators
+// 	Approved  []bool   `json:"approved,omitempty"` // whether each validator has approved
+// }
 
 type ListValidatorsResponse struct {
 	Validators []*Validator `json:"validators,omitempty"`
