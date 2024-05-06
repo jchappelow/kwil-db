@@ -46,7 +46,7 @@ type txClient interface {
 
 // NewClient creates a new admin client.
 // It can be configured to either use TLS or not, if using gRPC.
-// The target arg should be either "tcp://localhost:50151", "localhost:50151", or "unix://path/to/socket.sock"
+// The target arg should be either "127.0.0.1:8485", or "/path/to/socket.socket"
 func NewClient(ctx context.Context, target string, opts ...AdminClientOpt) (*AdminClient, error) {
 	c := &AdminClient{
 		log: log.NewNoOp(),

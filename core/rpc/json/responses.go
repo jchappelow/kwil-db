@@ -19,9 +19,9 @@ type VersionResponse struct {
 
 // AccountResponse contains the response object for MethodAccount.
 type AccountResponse struct {
-	Identifier []byte `json:"identifier,omitempty"`
-	Balance    string `json:"balance"`
-	Nonce      int64  `json:"nonce"`
+	Identifier types.HexBytes `json:"identifier,omitempty"`
+	Balance    string         `json:"balance"`
+	Nonce      int64          `json:"nonce"`
 }
 
 // BroadcastResponse contains the response object for MethodBroadcast.

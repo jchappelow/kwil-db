@@ -134,7 +134,7 @@ func (r *ActHelper) LoadConfig() *ActTestCfg {
 		JSONRPCEndpoint:           getEnv("KACT_JSONRPC_ENDPOINT", "http://127.0.0.1:8484/rpc/v1"),
 		HTTPEndpoint:              getEnv("KACT_HTTP_ENDPOINT", "http://127.0.0.1:8080/"),
 		P2PAddress:                getEnv("KACT_CHAIN_ENDPOINT", "tcp://0.0.0.0:26656"),
-		AdminRPC:                  getEnv("KACT_ADMIN_RPC", "unix:///tmp/admin.sock"),
+		AdminRPC:                  getEnv("KACT_ADMIN_RPC", "/tmp/admin.socket"),
 		DockerComposeFile:         getEnv("KACT_DOCKER_COMPOSE_FILE", "./docker-compose.yml"),
 		DockerComposeOverrideFile: getEnv("KACT_DOCKER_COMPOSE_OVERRIDE_FILE", "./docker-compose.override.yml"),
 	}

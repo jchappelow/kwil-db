@@ -27,7 +27,7 @@ type SchemaRequest struct {
 
 // AccountRequest contains the request parameters for MethodAccount.
 type AccountRequest struct {
-	Identifier []byte         `json:"identifier,omitempty"`
+	Identifier types.HexBytes `json:"identifier,omitempty"`
 	Status     *AccountStatus `json:"status,omitempty"` // Mapped to URL query parameter `status`.
 }
 
@@ -74,7 +74,7 @@ type ChainInfoRequest struct{}
 
 // ListDatabasesRequest contains the request parameters for MethodDatabases.
 type ListDatabasesRequest struct {
-	Owner []byte `json:"owner,omitempty"` // string would be better for identifiers that are addresses (hex)
+	Owner types.HexBytes `json:"owner,omitempty"`
 }
 
 // PingRequest contains the request parameters for MethodPing.
