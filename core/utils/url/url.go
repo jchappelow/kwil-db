@@ -64,14 +64,21 @@ const (
 // If it does not have a port, it is set to 0. This is only appropriate for
 // listen addresses.
 func ParseURL(u string) (*URL, error) {
+	return ParseURLWithSchemeFallback(u, "")
+}
+
+func ParseURLWithSchemeFallback(u, assumedScheme string) (*URL, error) {
 	original := u
-	// If the url does not have a scheme, assume it's a tcp address, rewrite and reparse.
+	// If the url does not have a scheme, give it one, rewrite and reparse.
 	hasScheme, err := HasScheme(u)
 	if err != nil {
 		return nil, err
 	}
 	if !hasScheme {
-		u = "tcp://" + u
+		if assumedScheme == "" {
+			assumedScheme = "tcp://"
+		}
+		u = assumedScheme + u
 	}
 
 	parsed, err := url.Parse(u)

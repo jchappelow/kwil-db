@@ -6,19 +6,18 @@ package adminclient
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"net"
+	"net/http"
+	"os"
 
 	"github.com/kwilteam/kwil-db/core/log"
 	adminRpc "github.com/kwilteam/kwil-db/core/rpc/client/admin"
-	admingrpc "github.com/kwilteam/kwil-db/core/rpc/client/admin/grpc"
-	txGrpc "github.com/kwilteam/kwil-db/core/rpc/client/user/grpc"
+	adminjson "github.com/kwilteam/kwil-db/core/rpc/client/admin/jsonrpc"
+	rpcclient "github.com/kwilteam/kwil-db/core/rpc/client/user/jsonrpc"
 	"github.com/kwilteam/kwil-db/core/rpc/transport"
 	"github.com/kwilteam/kwil-db/core/types/transactions"
 	"github.com/kwilteam/kwil-db/core/utils/url"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 )
 
 // AdminClient is a client for the Kwil admin service.
@@ -51,49 +50,61 @@ func NewClient(ctx context.Context, target string, opts ...AdminClientOpt) (*Adm
 		log: log.NewNoOp(),
 	}
 
-	parsedTarget, err := url.ParseURL(target)
+	// Subtle way to default to either http or https
+	parsedTarget, err := url.ParseURLWithSchemeFallback(target, "http://")
 	if err != nil {
 		return nil, err
 	}
+
+	trans := http.DefaultTransport.(*http.Transport) // http.RoundTripper
 
 	// we can have:
 	// tcp + tls
 	// tcp + no tls
 	// unix socket + no tls
-	dialOpts := []grpc.DialOption{}
+
+	// Set RootCAs if we have a kwild cert file.
+	tlsConfig := transport.DefaultClientTLSConfig()
+	if c.kwildCertFile != "" {
+		pemCerts, err := os.ReadFile(c.kwildCertFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read cert file: %w", err)
+		}
+		if !tlsConfig.RootCAs.AppendCertsFromPEM(pemCerts) {
+			return nil, errors.New("credentials: failed to append certificates")
+		}
+	}
+
+	// Set Certificates for client authentication, if required
+	if c.clientKeyFile != "" && c.clientCertFile != "" {
+		authCert, err := tls.LoadX509KeyPair(c.clientCertFile, c.clientKeyFile)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.Certificates = append(tlsConfig.Certificates, authCert)
+	}
+
+	// This TLS config does not mean it will use TLS. The scheme dictates that.
+	trans.TLSClientConfig = tlsConfig
 
 	switch parsedTarget.Scheme {
-	case url.TCP: // default to grpc
-		if c.kwildCertFile != "" || c.clientKeyFile != "" || c.clientCertFile != "" {
-			// tcp + tls
-
-			tlsCfg, err := newAuthenticatedTLSConfig(c.kwildCertFile, c.clientCertFile, c.clientKeyFile)
-			if err != nil {
-				return nil, err
-			}
-
-			dialOpts = append(dialOpts, grpc.WithTransportCredentials(credentials.NewTLS(tlsCfg)))
-		} else {
-			// tcp + no tls
-			dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
-		}
-	case url.UNIX:
-		dialOpts = append(dialOpts, grpc.WithContextDialer(func(ctx context.Context, s string) (net.Conn, error) {
-			return net.Dial("unix", s)
-		}), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	case url.UNIX, url.HTTPS:
+		// Consider these the "safe" schema to be used without TLS.
 	default:
 		return nil, fmt.Errorf("unknown scheme %q", parsedTarget.Scheme)
 	}
 
-	// we dial a normal grpc connection, and then wrap it with the services
-	conn, err := grpc.DialContext(ctx, parsedTarget.Target, dialOpts...)
-	if err != nil {
-		return nil, err
-	}
+	var clOpts []rpcclient.Opts
+	rpcclient.Opts
 
-	c.AdminClient = admingrpc.NewAdminClient(conn)
+	opts = append(opts, rpcclient.WithHTTPClient(&http.Client{
+		Transport: trans,
+	}))
 
-	c.txClient = txGrpc.WrapConn(conn)
+	cl := adminjson.NewClient(parsedTargets, opts...)
+	c.AdminClient = cl
+
+	c.txClient = cl
 
 	return c, nil
 }
