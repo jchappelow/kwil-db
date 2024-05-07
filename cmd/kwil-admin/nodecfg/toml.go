@@ -126,7 +126,7 @@ pg_db_name = "{{ .AppCfg.DBName }}"
 # Disable TLS on the admin service server. It is automatically disabled for a
 # UNIX socket or loopback TCP listen address. This setting can disable it for
 # any TCP listen address.
-admin_notls = "{{ .AppCfg.NoTLS }}"
+admin_notls = {{ .AppCfg.NoTLS }}
 
 # The path to a file containing certificate that is used to create the HTTPS server.
 # Might be either absolute path or path related to the kwild root directory.
