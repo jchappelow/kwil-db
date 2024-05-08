@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/kwilteam/kwil-db/core/log"
 	"github.com/kwilteam/kwil-db/core/types"
@@ -48,8 +50,19 @@ func NewAbciApp(cfg *AbciConfig, snapshotter SnapshotModule, statesyncer StateSy
 		log: log,
 
 		validatorAddressToPubKey: make(map[string][]byte),
+		txCache:                  make(map[string]bool),
+
+		stats: make(map[uint64]Stats),
 	}
 
+	filename := "/Users/charithabandi/Desktop/kwil/dev/perf-metrics/results/memstats.json"
+	// Open the file
+	file, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		log.Error("failed to open file", zap.Error(err))
+		return nil
+	}
+	app.statsFile = file
 	return app
 }
 
@@ -96,6 +109,29 @@ type AbciApp struct {
 
 	// validatorAddressToPubKey is a map of validator addresses to their public keys
 	validatorAddressToPubKey map[string][]byte
+
+	// txCache stores hashes of all the transactions currently in the mempool.
+	// This is used to avoid recomputing the hash for all mempool transactions
+	// on every TxQuery request (to mitigate Potential DDOS attack vector).
+	// https://github.com/kwilteam/kwil-db/issues/714
+	txCache   map[string]bool
+	txCacheMu sync.RWMutex
+
+	// Stats file
+	statsFile *os.File
+	stats     map[uint64]Stats
+	statsMtx  sync.Mutex
+}
+
+type Stats struct {
+	CheckTxCount       uint64 `json:"check_tx_count"`
+	PrepareProposalIn  uint64 `json:"prepare_proposal_in"`
+	PrepareProposalOut uint64 `json:"prepare_proposal_out"`
+
+	CheckTxFail            uint64 `json:"check_tx_fail"`
+	CheckTxSize            uint64 `json:"check_tx_size"`
+	PrepareProposalInSize  uint64 `json:"prepare_proposal_in_size"`
+	PrepareProposalOutSize uint64 `json:"prepare_proposal_out_size"`
 }
 
 func (a *AbciApp) ChainID() string {
@@ -137,6 +173,15 @@ func (a *AbciApp) CheckTx(ctx context.Context, incoming *abciTypes.RequestCheckT
 	var err error
 	code := codeOk
 
+	a.statsMtx.Lock()
+	defer a.statsMtx.Unlock()
+	stats, ok := a.stats[a.height]
+	if !ok {
+		stats = Stats{}
+	}
+	stats.CheckTxCount++
+	stats.CheckTxSize += uint64(len(incoming.Tx))
+
 	// NOTE about the error logging here: These transactions are from users, so
 	// most of these are not server errors, but client errors, so we ideally do
 	// not want to log them at all in production. We'll keep a few for now to
@@ -147,24 +192,30 @@ func (a *AbciApp) CheckTx(ctx context.Context, incoming *abciTypes.RequestCheckT
 	if err != nil {
 		code = codeEncodingError
 		logger.Debug("failed to unmarshal transaction", zap.Error(err))
+		stats.CheckTxFail++
+		a.stats[a.height] = stats
 		return &abciTypes.ResponseCheckTx{Code: code.Uint32(), Log: err.Error()}, nil // return error now or is it still all about code?
 	}
 
-	txHash := cmtTypes.Tx(incoming.Tx).Hash()
 	logger.Debug("",
 		zap.String("sender", hex.EncodeToString(tx.Sender)),
 		zap.String("PayloadType", tx.Body.PayloadType.String()),
-		zap.Uint64("nonce", tx.Body.Nonce),
-		zap.String("hash", hex.EncodeToString(txHash)))
+		zap.Uint64("nonce", tx.Body.Nonce))
 
 	// For a new transaction (not re-check), before looking at execution cost or
 	// checking nonce validity, ensure the payload is recognized and signature is valid.
 	if newTx {
+		// Register the incoming transaction in the mempool txs cache.
+		txHash := cmtTypes.Tx(incoming.Tx).Hash()
+		a.txCache[string(txHash)] = true
+
 		// Verify the correct chain ID is set, if it is set.
 		if protected := tx.Body.ChainID != ""; protected && tx.Body.ChainID != a.cfg.ChainID {
 			code = codeWrongChain
 			logger.Info("wrong chain ID",
 				zap.String("payloadType", tx.Body.PayloadType.String()))
+			stats.CheckTxFail++
+			a.stats[a.height] = stats
 			return &abciTypes.ResponseCheckTx{Code: code.Uint32(), Log: "wrong chain ID"}, nil
 		}
 
@@ -173,10 +224,12 @@ func (a *AbciApp) CheckTx(ctx context.Context, incoming *abciTypes.RequestCheckT
 		if err != nil {
 			code = codeInvalidSignature
 			logger.Debug("failed to verify transaction", zap.Error(err))
+			stats.CheckTxFail++
+			a.stats[a.height] = stats
 			return &abciTypes.ResponseCheckTx{Code: code.Uint32(), Log: err.Error()}, nil
 		}
 	} else {
-		logger.Info("Recheck", zap.String("hash", hex.EncodeToString(txHash)), zap.Uint64("nonce", tx.Body.Nonce), zap.String("payloadType", tx.Body.PayloadType.String()), zap.String("sender", hex.EncodeToString(tx.Sender)))
+		logger.Info("Recheck", zap.String("sender", hex.EncodeToString(tx.Sender)), zap.Uint64("nonce", tx.Body.Nonce), zap.String("payloadType", tx.Body.PayloadType.String()))
 	}
 
 	err = a.txApp.ApplyMempool(ctx, tx)
@@ -194,9 +247,19 @@ func (a *AbciApp) CheckTx(ctx context.Context, incoming *abciTypes.RequestCheckT
 			code = codeUnknownError
 			logger.Warn("unexpected failure to verify transaction against local mempool state", zap.Error(err))
 		}
+		stats.CheckTxFail++
+		a.stats[a.height] = stats
 		return &abciTypes.ResponseCheckTx{Code: code.Uint32(), Log: err.Error()}, nil
 	}
 
+	// Cache the transaction hash
+	if newTx {
+		txHash := cmtTypes.Tx(incoming.Tx).Hash()
+		a.txCacheMu.Lock()
+		defer a.txCacheMu.Unlock()
+		a.txCache[string(txHash)] = true
+	}
+	a.stats[a.height] = stats
 	return &abciTypes.ResponseCheckTx{Code: code.Uint32()}, nil
 }
 
@@ -275,6 +338,12 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		abciRes.GasUsed = txRes.Spend
 
 		res.TxResults = append(res.TxResults, abciRes)
+
+		// Remove the transaction from the cache as it has been included in a block
+		hash := cmtTypes.Tx(tx).Hash()
+		a.txCacheMu.Lock()
+		delete(a.txCache, string(hash))
+		a.txCacheMu.Unlock()
 	}
 
 	res.ConsensusParamUpdates = &tendermintTypes.ConsensusParams{ // why are we "updating" these on every block? Should be nil for no update.
@@ -366,7 +435,17 @@ func validatorUpdates(initial, final []*types.Validator) []*types.Validator {
 // Commit persists the state changes. This is called under mempool lock in
 // cometbft, unlike FinalizeBlock.
 func (a *AbciApp) Commit(ctx context.Context, _ *abciTypes.RequestCommit) (*abciTypes.ResponseCommit, error) {
-	err := a.txApp.Commit(ctx)
+	a.statsMtx.Lock()
+	defer a.statsMtx.Unlock()
+
+	// write the stats to the file
+	bts, err := json.Marshal(a.stats)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal stats: %w", err)
+	}
+	os.WriteFile("/Users/charithabandi/Desktop/kwil/dev/perf-metrics/results/memstats.json", bts, 0644)
+
+	err = a.txApp.Commit(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to commit transaction app: %w", err)
 	}
@@ -788,6 +867,17 @@ func (a *AbciApp) PrepareProposal(ctx context.Context, req *abciTypes.RequestPre
 		zap.Int64("height", req.Height),
 		zap.Int("txs", len(req.Txs)))
 
+	stats, ok := a.stats[a.height]
+	if !ok {
+		stats = Stats{}
+	}
+	stats.PrepareProposalIn += uint64(len(req.Txs))
+	sz := uint64(0)
+	for _, tx := range req.Txs {
+		sz += uint64(len(tx))
+	}
+	stats.PrepareProposalInSize = sz
+
 	pubKey, ok := a.validatorAddressToPubKey[proposerAddrToString(req.ProposerAddress)]
 	if !ok {
 		// there is an edge case where cometbft will allow a node to PrepareProposal
@@ -808,6 +898,14 @@ func (a *AbciApp) PrepareProposal(ctx context.Context, req *abciTypes.RequestPre
 			}
 		}
 	}
+
+	stats.PrepareProposalOut += uint64(len(okTxns))
+	sz = 0
+	for _, tx := range okTxns {
+		sz += uint64(len(tx))
+	}
+	stats.PrepareProposalOutSize = sz
+	a.stats[a.height] = stats
 
 	return &abciTypes.ResponsePrepareProposal{
 		Txs: okTxns,
@@ -936,4 +1034,11 @@ type EventBroadcaster func(ctx context.Context, proposer []byte) error
 
 func (a *AbciApp) SetEventBroadcaster(fn EventBroadcaster) {
 	a.broadcastFn = fn
+}
+
+func (a *AbciApp) TxInMempool(txHash []byte) bool {
+	a.txCacheMu.Lock()
+	defer a.txCacheMu.Unlock()
+	_, ok := a.txCache[string(txHash)]
+	return ok
 }
