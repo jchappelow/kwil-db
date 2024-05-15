@@ -1,7 +1,7 @@
 FROM golang:1.22 AS build
 
-# Build Delve
-RUN go install github.com/go-delve/delve/cmd/dlv@latest
+# Build Delve, fully statically linked
+RUN CGO_ENABLED=0 go install -v -ldflags "-extldflags=-static" -tags netgo,usergo github.com/go-delve/delve/cmd/dlv@latest
 
 ARG version
 ARG build_time
@@ -23,7 +23,7 @@ RUN GOWORK=off GIT_VERSION=$version GIT_COMMIT=$git_commit BUILD_TIME=$build_tim
 RUN chmod +x /app/dist/kwild /app/dist/kwil-admin /app/dist/kwil-cli
 
 FROM alpine:3.19
-COPY --from=stage /go/bin/dlv /dlv
+COPY --from=build /go/bin/dlv /dlv
 WORKDIR /app
 RUN mkdir -p /var/run/kwil && chmod 777 /var/run/kwil
 RUN apk --no-cache add postgresql-client
