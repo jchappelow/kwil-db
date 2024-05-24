@@ -303,13 +303,13 @@ func (db *DB) beginReadTx(ctx context.Context, iso pgx.TxIsoLevel) (sql.Tx, erro
 	}, nil
 }
 
-// BeginReservedReadTx starts a read-only transaction using a reserved reader
+// BeginReservedReadTx starts a read-only transaction using a reserved
 // connection. This is to allow read-only consensus operations that operate
 // outside of the write transaction's lifetime, such as proposal preparation and
 // approval, to function without contention on the reader pool that services
 // user requests.
 func (db *DB) BeginReservedReadTx(ctx context.Context) (sql.Tx, error) {
-	tx, err := db.pool.reserved.BeginTx(ctx, pgx.TxOptions{
+	tx, err := db.pool.writer.BeginTx(ctx, pgx.TxOptions{
 		AccessMode: pgx.ReadOnly,
 		IsoLevel:   pgx.RepeatableRead,
 	})

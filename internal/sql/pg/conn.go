@@ -70,12 +70,11 @@ type ConnConfig struct {
 // building block or for testing individual systems outside of the context of a
 // session.
 type Pool struct {
-	readers  *pgxpool.Pool
-	writer   *pgxpool.Pool // a pool for auto-reconnect on Acquire, but should only be one actual writer
-	reserved *pgxpool.Pool // reserved readers so validator operations (block proposal) aren't blocked by RPC readers
-	// The above is a reserved/superuser connection pool in a manner similar to
-	// how postgres itself reserves connections with the reserved_connections
-	// and superuser_reserved_connections system settings.
+	readers *pgxpool.Pool
+	writer  *pgxpool.Pool // a pool for auto-reconnect on Acquire, but should only be one actual writer
+	// The writer above is a really reserved/superuser connection pool in a
+	// manner similar to how postgres itself reserves connections with the
+	// reserved_connections and superuser_reserved_connections system settings.
 	// https://www.postgresql.org/docs/current/runtime-config-connection.html#GUC-RESERVED-CONNECTIONS
 }
 
@@ -156,17 +155,9 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 		return nil, err
 	}
 
-	reservedCfg := pCfg.Copy()
-	reservedCfg.MaxConns = 2 // just one should be fine, but keep a pair for faster reconnect if it needs reconnect
-	reserved, err := pgxpool.NewWithConfig(ctx, reservedCfg)
-	if err != nil {
-		return nil, err
-	}
-
 	pool := &Pool{
-		readers:  db,
-		writer:   writer,
-		reserved: reserved,
+		readers: db,
+		writer:  writer,
 	}
 
 	return pool, db.Ping(ctx)
@@ -221,7 +212,6 @@ func (p *Pool) Execute(ctx context.Context, stmt string, args ...any) (*sql.Resu
 
 func (p *Pool) Close() error {
 	p.readers.Close()
-	p.reserved.Close()
 	p.writer.Close()
 	return nil
 }
