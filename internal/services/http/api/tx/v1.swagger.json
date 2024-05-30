@@ -781,6 +781,10 @@
     "txSchema": {
       "type": "object",
       "properties": {
+        "version": {
+          "type": "integer",
+          "format": "int64"
+        },
         "owner": {
           "type": "string",
           "format": "byte"

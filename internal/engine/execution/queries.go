@@ -281,8 +281,18 @@ func getSchemas(ctx context.Context, tx sql.Executor) ([]*types.Schema, error) {
 			return nil, fmt.Errorf("expected []byte, got %T", row[0])
 		}
 
+		var ver = struct {
+			Version uint32 `json:"version"`
+		}{}
+		err := json.Unmarshal(bts, &ver)
+		if err != nil {
+			return nil, fmt.Errorf("unmarshaling schema for version: %w", err)
+		}
+
+		// Here we can use different types like SchemaV2 etc. based on ver above.
+
 		schema := &types.Schema{}
-		err := json.Unmarshal(bts, schema)
+		err = json.Unmarshal(bts, schema)
 		if err != nil {
 			return nil, fmt.Errorf("unmarshaling schema: %w", err)
 		}

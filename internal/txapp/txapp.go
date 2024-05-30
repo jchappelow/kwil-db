@@ -114,6 +114,13 @@ func (r *TxApp) Log() *log.Logger {
 	return &r.log
 }
 
+func (r *TxApp) Abort() {
+	if r.genesisTx == nil {
+		return
+	}
+	r.genesisTx.Rollback(context.Background())
+}
+
 // GenesisInit initializes the TxApp. It must be called outside of a session,
 // and before any session is started.
 // It can assign the initial validator set and initial account balances.

@@ -27,6 +27,7 @@ func (s *Schema) Type() PayloadType {
 
 // Schema is a database schema that contains tables, procedures, and extensions.
 type Schema struct {
+	Version uint32
 	// Name is the name of the schema given by the deployer.
 	Name string
 	// Owner is the identifier (generally an address in bytes or public key) of the owner of the schema
@@ -423,6 +424,7 @@ func (f *ForeignProcedure) toTypes() *types.ForeignProcedure {
 func (s *Schema) FromTypes(s2 *types.Schema) {
 	s.Name = s2.Name
 	s.Owner = s2.Owner
+	s.Version = s2.Version
 
 	for _, table := range s2.Tables {
 		t := &Table{}

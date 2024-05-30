@@ -136,6 +136,7 @@ func convertToSchema(schema *httpTx.TxSchema) (*types.Schema, error) {
 	s := &types.Schema{
 		Owner:             decodedOwner,
 		Name:              schema.Name,
+		Version:           uint32(schema.Version),
 		Tables:            convertHttpTables(schema.Tables),
 		Actions:           convertHttpActions(schema.Actions),
 		Extensions:        convertHttpExtensions(schema.Extensions),

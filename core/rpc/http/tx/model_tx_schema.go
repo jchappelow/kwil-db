@@ -9,6 +9,7 @@
 package swagger
 
 type TxSchema struct {
+	Version int64 `json:"version,omitempty"`
 	Owner string `json:"owner,omitempty"`
 	Name string `json:"name,omitempty"`
 	Tables []TxTable `json:"tables,omitempty"`

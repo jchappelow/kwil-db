@@ -220,6 +220,7 @@ func (a *AbciApp) CheckTx(ctx context.Context, incoming *abciTypes.RequestCheckT
 func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinalizeBlock) (*abciTypes.ResponseFinalizeBlock, error) {
 	fmt.Printf("\n\n")
 	logger := a.log.With(zap.String("stage", "ABCI FinalizeBlock"), zap.Int64("height", req.Height))
+	logger.Info("finalize block")
 
 	res := &abciTypes.ResponseFinalizeBlock{}
 

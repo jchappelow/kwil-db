@@ -3,6 +3,7 @@
 ## Properties
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
+**Version** | **int64** |  | [optional] [default to null]
 **Owner** | **string** |  | [optional] [default to null]
 **Name** | **string** |  | [optional] [default to null]
 **Tables** | [**[]TxTable**](txTable.md) |  | [optional] [default to null]

@@ -79,6 +79,7 @@ func convertToPBCryptoSignature(sig *auth.Signature) *txpb.Signature {
 
 func convertSchemaToPB(schema *types.Schema) (*txpb.Schema, error) {
 	return &txpb.Schema{
+		Version:           schema.Version,
 		Owner:             schema.Owner,
 		Name:              schema.Name,
 		Tables:            convertTablesFromEngine(schema.Tables),

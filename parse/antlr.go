@@ -15,6 +15,8 @@ import (
 	"github.com/kwilteam/kwil-db/parse/gen"
 )
 
+const currentSchemaVersion = 1 // we are generating this types.Schema version, not a kf schema file version
+
 // schemaVisitor is a visitor for converting Kuneiform's ANTLR
 // generated parse tree into our native schema type. It will perform
 // syntax validation on actions and procedures.
@@ -315,6 +317,7 @@ func (s *schemaVisitor) VisitVariable_list(ctx *gen.Variable_listContext) any {
 
 func (s *schemaVisitor) VisitSchema(ctx *gen.SchemaContext) any {
 	s.schema = &types.Schema{
+		Version:           currentSchemaVersion,
 		Name:              ctx.Database_declaration().Accept(s).(string),
 		Tables:            arr[*types.Table](len(ctx.AllTable_declaration())),
 		Extensions:        arr[*types.Extension](len(ctx.AllUse_declaration())),
