@@ -263,20 +263,34 @@ func createSchema(ctx context.Context, tx sql.TxMaker, schema *types.Schema, txi
 	return sp.Commit(ctx)
 }
 
-// getSchemas returns all schemas in the kwil_schemas table.
-// convertFunc converts bytes into a schema. If nil, it will simply unmarshal the bytes.
-func getSchemas(ctx context.Context, tx sql.Executor, convertFunc func([]byte) (*types.Schema, error)) ([]*types.Schema, error) {
-	res, err := tx.Execute(ctx, sqlListSchemaContent)
+func unmarshalSchema(b []byte) (*types.Schema, error) {
+	var verStruct struct {
+		Version uint32 `json:"version"`
+	}
+	err := json.Unmarshal(b, &verStruct)
 	if err != nil {
 		return nil, err
 	}
 
-	if convertFunc == nil {
-		convertFunc = func(b []byte) (*types.Schema, error) {
-			schema := &types.Schema{}
-			err := json.Unmarshal(b, schema)
-			return schema, err
-		}
+	switch v := verStruct.Version; v {
+	case 0:
+		return convertV07Schema(b)
+	case 1:
+		schema := &types.Schema{}
+		err := json.Unmarshal(b, schema)
+		return schema, err
+	// case 2: types.SchemaV2 ...
+	default:
+		return nil, fmt.Errorf("unrecognized schema version %d", v)
+	}
+}
+
+// getSchemas returns all schemas in the kwil_schemas table.
+// convertFunc converts bytes into a schema. If nil, it will simply unmarshal the bytes.
+func getSchemas(ctx context.Context, tx sql.Executor) ([]*types.Schema, error) {
+	res, err := tx.Execute(ctx, sqlListSchemaContent)
+	if err != nil {
+		return nil, err
 	}
 
 	schemas := make([]*types.Schema, len(res.Rows))
@@ -290,7 +304,7 @@ func getSchemas(ctx context.Context, tx sql.Executor, convertFunc func([]byte) (
 			return nil, fmt.Errorf("expected []byte, got %T", row[0])
 		}
 
-		schema, err := convertFunc(bts)
+		schema, err := unmarshalSchema(bts)
 		if err != nil {
 			return nil, err
 		}

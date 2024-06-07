@@ -13,6 +13,10 @@ import (
 
 // Schema is a database schema that contains tables, procedures, and extensions.
 type Schema struct {
+	// Version indicates the version of the Schema structure used. This reflects
+	// both the JSON document format and the Go struct fields and the recognized
+	// values and formats.
+	Version uint32 `json:"version"`
 	// Name is the name of the schema given by the deployer.
 	Name string `json:"name"`
 	// Owner is the identifier (generally an address in bytes or public key) of the owner of the schema
