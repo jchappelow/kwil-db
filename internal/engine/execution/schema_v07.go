@@ -2,6 +2,7 @@ package execution
 
 import (
 	"encoding/json"
+	"strings"
 
 	"github.com/kwilteam/kwil-db/core/types"
 )
@@ -24,15 +25,13 @@ func convertV07Schema(bts []byte) (*types.Schema, error) {
 			attrs := make([]*types.Attribute, len(c.Attributes))
 			for k, a := range c.Attributes {
 				attrs[k] = &types.Attribute{
-					Type:  types.AttributeType(a.Type),
+					Type:  types.AttributeType(a.Type), // no change from v0.7
 					Value: a.Value,
 				}
 			}
 			columns[j] = &types.Column{
-				Name: c.Name,
-				Type: &types.DataType{
-					Name: string(c.Type),
-				},
+				Name:       c.Name,
+				Type:       convertType(c.Type),
 				Attributes: attrs,
 			}
 		}
@@ -42,7 +41,7 @@ func convertV07Schema(bts []byte) (*types.Schema, error) {
 			indexes[j] = &types.Index{
 				Name:    idx.Name,
 				Columns: idx.Columns,
-				Type:    types.IndexType(idx.Type),
+				Type:    types.IndexType(idx.Type), // no change from v0.7
 			}
 		}
 
@@ -104,6 +103,7 @@ func convertV07Schema(bts []byte) (*types.Schema, error) {
 		for _, s := range p.Statements {
 			body += s + "\n"
 		}
+		// trailing newline? or strings.Join(p.Statements, "\n")?
 		actions[i].Body = body
 	}
 
@@ -113,8 +113,37 @@ func convertV07Schema(bts []byte) (*types.Schema, error) {
 		Extensions: extensions,
 		Tables:     tables,
 		Actions:    actions,
+		// No procedures or foreign procedure calls in v0.7
 	}, nil
 
+}
+
+func convertType(t string) *types.DataType {
+	const (
+		v07NULL = "NULL"
+		v07TEXT = "TEXT"
+		v07INT  = "INT"
+		v07BLOB = "BLOB"
+		v07BOOL = "BOOLEAN" // different from "bool" in v0.8
+	)
+
+	switch t {
+	case v07NULL:
+		return types.NullType
+	case v07TEXT:
+		return types.TextType
+	case v07INT:
+		return types.IntType
+	case v07BLOB:
+		return types.BlobType
+	case v07BOOL:
+		return types.BoolType
+	default:
+		// maybe panic? types.UnknownType?
+		return &types.DataType{
+			Name: strings.ToLower(t),
+		}
+	}
 }
 
 // v07Schema is a database schema that contains tables, procedures, and extensions.
@@ -139,7 +168,7 @@ type v07Table struct {
 // v07Column is a column in a table.
 type v07Column struct {
 	Name       string          `json:"name"`
-	Type       v07DataType     `json:"type"`
+	Type       string          `json:"type"`
 	Attributes []*v07Attribute `json:"attributes,omitempty"`
 }
 
@@ -170,10 +199,6 @@ type v07ForeignKey struct {
 	// ParentTable is the table that holds the parent columns.
 	// For example, in FOREIGN KEY (a) REFERENCES tbl2(b), "tbl2" is the parent table
 	ParentTable string `json:"parent_table"`
-
-	// Do we need parent schema stored with meta data or should assume and
-	// enforce same schema when creating the dataset with generated DDL.
-	// ParentSchema string `json:"parent_schema"`
 
 	// Action refers to what the foreign key should do when the parent is altered.
 	// This is NOT the same as a database action;
@@ -209,10 +234,7 @@ type v07ExtensionConfig struct {
 	Value string `json:"value"`
 }
 
-// v07DataType is a type of data (e.g. NULL, TEXT, INT, BLOB, BOOLEAN)
-type v07DataType string
-
-// v07Procedure is a procedure in a database schema.
+// v07Procedure is a legacy action in the v0.7 database schema.
 // These are defined by Kuneiform's `action` keyword.
 type v07Procedure struct {
 	Name        string   `json:"name"`
