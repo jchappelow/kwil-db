@@ -789,6 +789,8 @@ func (r *TxApp) Commit(ctx context.Context) (int64, error) {
 
 	r.announceValidators()
 
+	r.log.Infof("snap? height setting = %d, snapshotter? %v, in catchup? %v", r.height, r.snapshotter != nil, r.replayStatusFn())
+
 	// Take a snapshot of the database if node is not in the catchup mode and snapshots are enabled
 	if r.snapshotter != nil && r.replayStatusFn != nil &&
 		r.snapshotter.IsSnapshotDue(uint64(r.height)) && !r.replayStatusFn() {

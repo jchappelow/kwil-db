@@ -97,6 +97,7 @@ func NewSnapshotStore(cfg *SnapshotConfig, dbCfg *DBConfig, logger log.Logger) (
 
 // IsSnapshotDue checks if a snapshot is due at the given height.
 func (s *SnapshotStore) IsSnapshotDue(height uint64) bool {
+	s.log.Infof("due? height %d / recurring %d", height, s.cfg.RecurringHeight)
 	return (height % s.cfg.RecurringHeight) == 0
 }
 
@@ -225,7 +226,10 @@ func (s *SnapshotStore) loadSnapshots() error {
 	// Scan the snapshot directory and load all the snapshots
 	files, err := os.ReadDir(s.cfg.SnapshotDir)
 	if err != nil {
-		return nil
+		if os.IsNotExist(err) {
+			return os.MkdirAll(s.cfg.SnapshotDir, 0755)
+		}
+		return err
 	}
 
 	for _, file := range files {
