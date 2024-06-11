@@ -615,7 +615,7 @@ func buildStatesyncer(d *coreDependencies) *statesync.StateSyncer {
 		// Try to fetch the status of the remote server.
 		res, err := clt.Header(d.ctx, nil)
 		if err != nil {
-			d.log.Warnf("failed to header from snap provider: %v", err)
+			d.log.Warnf("failed to get header from snap provider: %v", err)
 			continue
 		}
 
