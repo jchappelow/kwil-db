@@ -19,7 +19,7 @@ import (
 )
 
 const (
-	chunkSize int64 = 16e6 // 16 MB
+	chunkSize int64 = 16e6 - 4096 // 16 MB
 
 	DefaultSnapshotFormat = 0
 
