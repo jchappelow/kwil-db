@@ -355,7 +355,10 @@ func GetCfg(flagCfg *KwildConfig, quickStart bool) (*KwildConfig, bool, error) {
 	}
 
 	// 4. Merge in the flag config
-	// merge in flag config
+	err = flagCfg.sanitizeCfgPaths(true) // dots as cwd
+	if err != nil {
+		return nil, false, err
+	}
 	err = cfg.Merge(flagCfg)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to merge flag config: %w", err)
@@ -363,12 +366,11 @@ func GetCfg(flagCfg *KwildConfig, quickStart bool) (*KwildConfig, bool, error) {
 
 	cfg.RootDir = rootDir
 
-	err = cfg.sanitizeCfgPaths()
+	err = cfg.sanitizeCfgPaths(false) // dots as root dir
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to sanitize config paths: %w", err)
 	}
 
-	cfg.configureCerts()
 	if cfg.ChainCfg.Moniker == "" {
 		cfg.ChainCfg.Moniker = defaultMoniker()
 	}
@@ -658,23 +660,43 @@ func (cfg *KwildConfig) LogConfig() *log.Config {
 	}
 }
 
-func (cfg *KwildConfig) configureCerts() {
-	if cfg.AppCfg.TLSCertFile == "" {
-		cfg.AppCfg.TLSCertFile = DefaultTLSCertFile
+func expandPathFn(rootDir string) func(string) string {
+	if rootDir == "" { // dots relative to cwd
+		return func(path string) string {
+			path, err := ExpandPath(path)
+			if err != nil {
+				panic("unable to get home or current directory")
+			}
+			return path
+		}
 	}
-	cfg.AppCfg.TLSCertFile = rootify(cfg.AppCfg.TLSCertFile, cfg.RootDir)
 
-	if cfg.AppCfg.TLSKeyFile == "" {
-		cfg.AppCfg.TLSKeyFile = defaultTLSKeyFile
+	// dots relative to rootdir
+	return func(path string) string {
+		path, err := ExpandHome(path)
+		if err != nil {
+			panic("unable to get home directory")
+		}
+		return rootify(path, rootDir)
 	}
-	cfg.AppCfg.TLSKeyFile = rootify(cfg.AppCfg.TLSKeyFile, cfg.RootDir)
 }
 
-func (cfg *KwildConfig) sanitizeCfgPaths() error {
+func (cfg *KwildConfig) sanitizeCfgPaths(fromFlags bool) (err error) {
 	rootDir := cfg.RootDir
 
+	defer func() {
+		if rv := recover(); rv != nil {
+			err = fmt.Errorf("path error: %v", rv)
+		}
+	}()
+
+	expand := expandPathFn(rootDir)
+	if fromFlags {
+		expand = expandPathFn("") // expand dots prefix to cwd
+	}
+
 	if cfg.AppCfg.PrivateKeyPath != "" {
-		cfg.AppCfg.PrivateKeyPath = rootify(cfg.AppCfg.PrivateKeyPath, rootDir)
+		cfg.AppCfg.PrivateKeyPath = expand(cfg.AppCfg.PrivateKeyPath)
 	} else {
 		cfg.AppCfg.PrivateKeyPath = filepath.Join(rootDir, PrivateKeyFileName)
 	}
@@ -684,11 +706,7 @@ func (cfg *KwildConfig) sanitizeCfgPaths() error {
 		if cfg.AppCfg.Snapshots.SnapshotDir == "" {
 			cfg.AppCfg.Snapshots.SnapshotDir = filepath.Join(rootDir, SnapshotDirName)
 		} else {
-			dir, err := ExpandPath(cfg.AppCfg.Snapshots.SnapshotDir)
-			if err != nil {
-				return fmt.Errorf("failed to expand snapshot directory \"%v\": %v", cfg.AppCfg.Snapshots.SnapshotDir, err)
-			}
-			cfg.AppCfg.Snapshots.SnapshotDir = dir
+			cfg.AppCfg.Snapshots.SnapshotDir = expand(cfg.AppCfg.Snapshots.SnapshotDir)
 		}
 		fmt.Println("Snapshot directory:", cfg.AppCfg.Snapshots.SnapshotDir)
 	}
@@ -697,23 +715,26 @@ func (cfg *KwildConfig) sanitizeCfgPaths() error {
 		if cfg.ChainCfg.StateSync.SnapshotDir == "" {
 			cfg.ChainCfg.StateSync.SnapshotDir = filepath.Join(rootDir, ReceivedSnapsDirName)
 		} else {
-			dir, err := ExpandPath(cfg.ChainCfg.StateSync.SnapshotDir)
-			if err != nil {
-				return fmt.Errorf("failed to expand snapshot directory \"%v\": %v", cfg.ChainCfg.StateSync.SnapshotDir, err)
-			}
-			cfg.ChainCfg.StateSync.SnapshotDir = dir
+			cfg.ChainCfg.StateSync.SnapshotDir = expand(cfg.ChainCfg.StateSync.SnapshotDir)
 		}
 		fmt.Println("State sync received snapshots directory:", cfg.ChainCfg.StateSync.SnapshotDir)
 	}
 
 	if cfg.AppCfg.GenesisState != "" {
-		path, err := ExpandPath(cfg.AppCfg.GenesisState)
-		if err != nil {
-			return fmt.Errorf("failed to expand snapshot file path \"%v\": %v", cfg.AppCfg.GenesisState, err)
-		}
-		cfg.AppCfg.GenesisState = path
+		cfg.AppCfg.GenesisState = expand(cfg.AppCfg.GenesisState)
 		fmt.Println("Snapshot file to initialize database from:", cfg.AppCfg.GenesisState)
 	}
+
+	if cfg.AppCfg.TLSCertFile == "" {
+		cfg.AppCfg.TLSCertFile = DefaultTLSCertFile
+	}
+	cfg.AppCfg.TLSCertFile = expand(cfg.AppCfg.TLSCertFile)
+
+	if cfg.AppCfg.TLSKeyFile == "" {
+		cfg.AppCfg.TLSKeyFile = defaultTLSKeyFile
+	}
+	cfg.AppCfg.TLSKeyFile = expand(cfg.AppCfg.TLSKeyFile)
+
 	return nil
 }
 
@@ -722,24 +743,24 @@ func (cfg *KwildConfig) InitPrivateKeyAndGenesis(autogen bool) (privateKey *cryp
 	return loadGenesisAndPrivateKey(autogen, cfg.AppCfg.PrivateKeyPath, cfg.RootDir)
 }
 
-func ExpandPath(path string) (string, error) {
-	var expandedPath string
+func ExpandHome(path string) (string, error) {
 	if tail, cut := strings.CutPrefix(path, "~/"); cut {
 		// Expands ~/ in the path
 		homeDir, err := os.UserHomeDir()
 		if err != nil {
 			return "", err
 		}
-		expandedPath = filepath.Join(homeDir, tail)
-	} else {
-		// Expands relative paths
-		absPath, err := filepath.Abs(path)
-		if err != nil {
-			return "", fmt.Errorf("failed to get absolute path of file: %v due to error: %v", path, err)
-		}
-		expandedPath = absPath
+		return filepath.Join(homeDir, tail), nil
 	}
-	return expandedPath, nil
+	return path, nil
+}
+
+func ExpandPath(path string) (string, error) {
+	path, err := ExpandHome(path) // ~ => home
+	if err != nil {
+		return "", nil
+	}
+	return filepath.Abs(path) // . => cwd
 }
 
 // saveNodeKey writes the private key hexadecimal encoded to a file.
