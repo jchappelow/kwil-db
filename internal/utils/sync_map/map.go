@@ -17,6 +17,13 @@ type Map[K comparable, V any] struct {
 	m  map[K]V
 }
 
+// New creates a new map.
+func New[K comparable, V any]() *Map[K, V] {
+	return &Map[K, V]{
+		m: make(map[K]V),
+	}
+}
+
 // Get gets a value from the map.
 // It returns the value, and whether it was found.
 func (m *Map[K, V]) Get(key K) (value V, ok bool) {

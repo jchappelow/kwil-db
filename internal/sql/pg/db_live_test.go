@@ -4,6 +4,8 @@ package pg
 
 import (
 	"context"
+	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -576,4 +578,119 @@ func Test_DelayedTx(t *testing.T) {
 
 	err = tx2.Commit(ctx)
 	require.NoError(t, err)
+}
+
+func Test_Listen(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := NewDB(ctx, cfg)
+	require.NoError(t, err)
+	defer db.Close()
+
+	/*
+		we test writing to two different txs at the same time,
+		ensuring that both listeners receive their respective
+		notifications.
+	*/
+
+	tx, err := db.BeginOuterTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	// allocating 20 to allow it to potentially receive
+	// notifications from the other tx. We are testing
+	// that this does not happen
+	ch1 := make(chan string, 20)
+
+	done, err := tx.Subscribe(ctx, ch1)
+	require.NoError(t, err)
+	defer done()
+
+	// create a readTx that will also notify
+	readTx, err := db.BeginReadTx(ctx)
+	require.NoError(t, err)
+	defer readTx.Rollback(ctx)
+
+	ch2 := make(chan string, 20)
+	done2, err := readTx.Subscribe(ctx, ch2)
+	require.NoError(t, err)
+	defer done2()
+
+	// notify 10 times to each
+	for i := 0; i < 10; i++ {
+		_, err = tx.Execute(ctx, "SELECT NOTICE($1);", fmt.Sprint(i))
+		require.NoError(t, err)
+
+		_, err = readTx.Execute(ctx, "SELECT NOTICE($1);", fmt.Sprint(-i))
+		require.NoError(t, err)
+	}
+
+	var received []string
+	var received2 []string
+
+	search := true
+	for search {
+		select {
+		case s := <-ch1:
+			received = append(received, s)
+		case s := <-ch2:
+			received2 = append(received2, s)
+		case <-time.After(1 * time.Millisecond):
+			search = false
+		}
+	}
+
+	require.Len(t, received, 10)
+	require.Len(t, received2, 10)
+
+	for i := 0; i < 10; i++ {
+		require.Equal(t, strconv.Itoa(i), received[i])
+		require.Equal(t, strconv.Itoa(-i), received2[i])
+	}
+}
+
+func Test_CancelListen(t *testing.T) {
+	ctx := context.Background()
+
+	db, err := NewDB(ctx, cfg)
+	require.NoError(t, err)
+	defer db.Close()
+
+	collected := make(chan string, 20)
+
+	tx, err := db.BeginOuterTx(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback(ctx)
+
+	done, err := tx.Subscribe(ctx, collected)
+	require.NoError(t, err)
+	defer done()
+
+	for i := 0; i < 10; i++ {
+		_, err = tx.Execute(ctx, "SELECT NOTICE($1);", fmt.Sprint(i))
+		require.NoError(t, err)
+	}
+
+	// we stop mid way through, we should see no events since events
+	// are sent on commit
+	done()
+	require.NoError(t, err)
+
+	for i := 0; i < 10; i++ {
+		_, err = tx.Execute(ctx, "SELECT NOTICE($1);", fmt.Sprint(-(i + 1)))
+		require.NoError(t, err)
+	}
+
+	var received []string
+	loop := true
+	for loop {
+		select {
+		case s := <-collected:
+			received = append(received, s)
+		case <-time.After(1 * time.Millisecond):
+			loop = false
+		}
+	}
+
+	require.Len(t, received, 10)
 }

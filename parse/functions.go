@@ -39,6 +39,22 @@ var (
 			},
 			PGFormat: defaultFormat("error"),
 		},
+		"notice": {
+			ValidateArgs: func(args []*types.DataType) (*types.DataType, error) {
+				if len(args) != 1 {
+					return nil, wrapErrArgumentNumber(1, len(args))
+				}
+
+				if !args[0].EqualsStrict(types.TextType) {
+					return nil, wrapErrArgumentType(types.TextType, args[0])
+				}
+
+				// technically error returns nothing, but for backwards compatibility with SELECT CASE we return null.
+				// It doesn't really matter, since error will cancel execution anyways.
+				return types.NullType, nil
+			},
+			PGFormat: defaultFormat("notice"),
+		},
 		"uuid_generate_v5": {
 			ValidateArgs: func(args []*types.DataType) (*types.DataType, error) {
 				// first argument must be a uuid, second argument must be text

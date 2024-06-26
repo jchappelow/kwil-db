@@ -473,6 +473,21 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		Proposer:     proposerPubKey,
 	}
 
+	// channel for logs
+	logs := make(chan string)
+	var logArr []string // we will zero this after every tx
+	go func() {
+		for log := range logs {
+			logArr = append(logArr, log)
+		}
+	}()
+
+	// subscribe to any notifications
+	done, err := a.consensusTx.Subscribe(ctx, logs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to subscribe to notifications: %w", err)
+	}
+
 	for _, tx := range req.Txs {
 		decoded := &transactions.Transaction{}
 		err := decoded.UnmarshalBinary(tx)
@@ -498,6 +513,26 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		abciRes.Code = txRes.ResponseCode.Uint32()
 		abciRes.GasUsed = txRes.Spend
 
+		// until we have gas costs to protect against log spam, we will arbitrarily cap
+		// logs at 1KB
+		totalLogSize := 0
+
+		// get the logs for this tx
+		for _, log := range logArr {
+			if totalLogSize+len(log) > 1024 {
+				abciRes.Log += "\n[truncated]"
+				break
+			}
+
+			totalLogSize += len(log)
+
+			if abciRes.Log != "" {
+				abciRes.Log += "\n"
+			}
+			abciRes.Log += log
+		}
+		logArr = nil // zero to avoid leaking logs between txs
+
 		res.TxResults = append(res.TxResults, abciRes)
 
 		// Remove the transaction from the cache as it has been included in a block
@@ -505,6 +540,10 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		delete(a.verifiedTxns, txHash)
 		a.verifiedTxnsMtx.Unlock()
 	}
+
+	// close the logs channel
+	done()
+	close(logs)
 
 	// If at activation height, submit any consensus params updates associated
 	// with the fork. They should not overlap (some forks should be superseded

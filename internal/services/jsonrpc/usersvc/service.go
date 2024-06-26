@@ -33,9 +33,14 @@ type Service struct {
 	readTxTimeout time.Duration
 
 	engine      EngineReader
-	db          sql.DelayedReadTxMaker // this should only ever make a read-only tx
-	nodeApp     NodeApplication        // so we don't have to do ABCIQuery (indirect)
+	db          DB              // this should only ever make a read-only tx
+	nodeApp     NodeApplication // so we don't have to do ABCIQuery (indirect)
 	chainClient BlockchainTransactor
+}
+
+type DB interface {
+	sql.ReadTxMaker
+	sql.DelayedReadTxMaker
 }
 
 type serviceCfg struct {
@@ -56,7 +61,7 @@ func WithReadTxTimeout(timeout time.Duration) Opt {
 const defaultReadTxTimeout = 5 * time.Second
 
 // NewService creates a new instance of the user RPC service.
-func NewService(db sql.DelayedReadTxMaker, engine EngineReader, chainClient BlockchainTransactor,
+func NewService(db DB, engine EngineReader, chainClient BlockchainTransactor,
 	nodeApp NodeApplication, logger log.Logger, opts ...Opt) *Service {
 	cfg := &serviceCfg{
 		readTxTimeout: defaultReadTxTimeout,
@@ -494,8 +499,35 @@ func (svc *Service) Call(ctx context.Context, req *userjson.CallRequest) (*userj
 	ctxExec, cancel := context.WithTimeout(ctx, svc.readTxTimeout)
 	defer cancel()
 
-	readTx := svc.db.BeginDelayedReadTx()
+	// we use a basic read tx since we are subscribing to notices,
+	// and it is therefore pointless to use a delayed tx
+	readTx, err := svc.db.BeginReadTx(ctx)
+	if err != nil {
+		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "failed to start read tx", nil)
+	}
 	defer readTx.Rollback(ctx)
+
+	logCh := make(chan string)
+	var logs []string
+
+	done, err := readTx.Subscribe(ctx, logCh)
+	if err != nil {
+		close(logCh)
+		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "failed to subscribe to notices", nil)
+	}
+	defer done()
+	defer close(logCh) // close logCh after done to avoid potential infinite blocking.
+
+	go func() {
+		for {
+			select {
+			case <-ctxExec.Done():
+				return
+			case logMsg := <-logCh:
+				logs = append(logs, logMsg)
+			}
+		}
+	}()
 
 	executeResult, err := svc.engine.Procedure(ctxExec, readTx, &common.ExecutionData{
 		Dataset:   body.DBID,
@@ -519,6 +551,7 @@ func (svc *Service) Call(ctx context.Context, req *userjson.CallRequest) (*userj
 
 	return &userjson.CallResponse{
 		Result: btsResult,
+		Logs:   logs,
 	}, nil
 }
 
