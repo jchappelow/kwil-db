@@ -64,13 +64,13 @@ func getTxID(ctx context.Context, conn sql.Executor) (int64, error) {
 // if it is not, it will return 0, "", false.
 func containsTxid(notice string) (int64, string, bool) {
 	// trim off the txid prefix
-	if !strings.HasPrefix(notice, "pgtx:") {
+	notice, cut := strings.CutPrefix(notice, "pgtx:")
+	if !cut {
 		return 0, "", false
 	}
-	n := strings.TrimPrefix(notice, "pgtx:")
 
 	// split from the first space
-	strs := strings.SplitN(n, " ", 2)
+	strs := strings.SplitN(notice, " ", 2)
 	if len(strs) != 2 {
 		return 0, "", false
 	}

@@ -138,5 +138,5 @@ type Subscriber interface {
 	// on this tx, will be received. It returns a done function that should be
 	// called when the subscription is no longer needed. It is the callers
 	// responsibility to call done and close the channel.
-	Subscribe(ctx context.Context, ch chan<- string) (done func(), err error)
+	Subscribe(ctx context.Context) (ch <-chan string, done func(), err error)
 }

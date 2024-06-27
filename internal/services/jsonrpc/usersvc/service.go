@@ -507,27 +507,11 @@ func (svc *Service) Call(ctx context.Context, req *userjson.CallRequest) (*userj
 	}
 	defer readTx.Rollback(ctx)
 
-	logCh := make(chan string)
-	var logs []string
-
-	done, err := readTx.Subscribe(ctx, logCh)
+	logCh, done, err := readTx.Subscribe(ctx)
 	if err != nil {
-		close(logCh)
 		return nil, jsonrpc.NewError(jsonrpc.ErrorNodeInternal, "failed to subscribe to notices", nil)
 	}
 	defer done()
-	defer close(logCh) // close logCh after done to avoid potential infinite blocking.
-
-	go func() {
-		for {
-			select {
-			case <-ctxExec.Done():
-				return
-			case logMsg := <-logCh:
-				logs = append(logs, logMsg)
-			}
-		}
-	}()
 
 	executeResult, err := svc.engine.Procedure(ctxExec, readTx, &common.ExecutionData{
 		Dataset:   body.DBID,
@@ -547,6 +531,20 @@ func (svc *Service) Call(ctx context.Context, req *userjson.CallRequest) (*userj
 	btsResult, err := json.Marshal(resultMap(executeResult))
 	if err != nil {
 		return nil, jsonrpc.NewError(jsonrpc.ErrorResultEncoding, "failed to marshal call result", nil)
+	}
+
+	var logs []string
+LOG_LOOP:
+	for {
+		select {
+		case <-ctxExec.Done():
+			return nil, jsonrpc.NewError(jsonrpc.ErrorInternal, "cancel", nil)
+		case logMsg, ok := <-logCh:
+			if !ok {
+				break LOG_LOOP
+			}
+			logs = append(logs, logMsg)
+		}
 	}
 
 	return &userjson.CallResponse{

@@ -73,8 +73,8 @@ func (tx *dbTx) Precommit(ctx context.Context) ([]byte, error) {
 }
 
 // Subscribe subscribes to notifications passed using the special `notice()`
-func (tx *dbTx) Subscribe(ctx context.Context, ch chan<- string) (done func(), err error) {
-	return subscribe(ctx, tx, ch, tx.db.pool.subscribers)
+func (tx *dbTx) Subscribe(ctx context.Context) (ch <-chan string, done func(), err error) {
+	return subscribe(ctx, tx, tx.db.pool.subscribers)
 }
 
 // Commit commits the transaction. This partly satisfies sql.Tx.
@@ -123,8 +123,8 @@ func (tx *readTx) Rollback(ctx context.Context) error {
 }
 
 // Subscribe subscribes to notifications passed using the special `notice()`
-func (tx *readTx) Subscribe(ctx context.Context, ch chan<- string) (done func(), err error) {
-	return subscribe(ctx, tx, ch, tx.subscribers)
+func (tx *readTx) Subscribe(ctx context.Context) (ch <-chan string, done func(), err error) {
+	return subscribe(ctx, tx, tx.subscribers)
 }
 
 // delayedReadTx is a tx that handles a read-only transaction.
@@ -190,10 +190,10 @@ func (d *delayedReadTx) AccessMode() common.AccessMode {
 }
 
 // Subscribe subscribes to notifications passed using the special `notice()`
-func (d *delayedReadTx) Subscribe(ctx context.Context, ch chan<- string) (done func(), err error) {
+func (d *delayedReadTx) Subscribe(ctx context.Context) (ch <-chan string, done func(), err error) {
 	if err := d.ensureTx(ctx); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return subscribe(ctx, d.tx, ch, d.db.pool.subscribers)
+	return subscribe(ctx, d.tx, d.db.pool.subscribers)
 }

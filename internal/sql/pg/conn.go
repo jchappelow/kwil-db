@@ -127,6 +127,18 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 	// NOTE: we can consider changing the default exec mode at construction e.g.:
 	// pCfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
 	pCfg.ConnConfig.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) {
+		// Handling the Listen system.
+		// parse off any leading txid indicator. If successful, send the notice to the subscribers
+		if txid, log, ok := containsTxid(n.Message); ok {
+			subscribers.ExclusiveRead(func(m map[int64]chan<- string) {
+				sub, ok := m[txid]
+				if !ok {
+					return
+				}
+				sub <- log
+			})
+		} // else if not a txid, just log like normal
+
 		level := log.InfoLevel
 		if n.Code == "42710" || strings.HasPrefix(n.Code, "42P") || // duplicate something ignored: https://www.postgresql.org/docs/16/errcodes-appendix.html
 			strings.HasPrefix(n.SchemaName, "ds_") { // user query error
@@ -137,20 +149,6 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 		} else {
 			logger.Logf(level, "%v [%v]: %v / %v", n.Severity, n.Code, n.Message, n.Detail)
 		}
-
-		// Handling the Listen system"
-		// parse off the leading txid indicator. If successful, send the notice to the subscribers
-		txid, log, ok := containsTxid(n.Message)
-		if !ok { // if not a txid, ignore
-			return
-		}
-
-		sub, ok := subscribers.Get(txid)
-		if !ok {
-			return
-		}
-
-		sub <- log
 	}
 	defaultOnPgError := pCfg.ConnConfig.OnPgError
 	pCfg.ConnConfig.OnPgError = func(c *pgconn.PgConn, n *pgconn.PgError) bool {
@@ -300,12 +298,14 @@ func (p *Pool) BeginReadTx(ctx context.Context) (sql.OuterReadTx, error) {
 }
 
 // subscribe subscribes a channel to notifications from the passed tx.
-func subscribe(ctx context.Context, exec sql.Executor, ch chan<- string, subscribers *syncmap.Map[int64, chan<- string]) (func(), error) {
+func subscribe(ctx context.Context, exec sql.Executor, subscribers *syncmap.Map[int64, chan<- string]) (<-chan string, func(), error) {
 	// get the txid of the current transaction
 	txid, err := getTxID(ctx, exec)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+
+	ch := make(chan string, 1)
 
 	subscribers.Exclusive(func(m map[int64]chan<- string) {
 		_, ok := m[txid]
@@ -317,7 +317,9 @@ func subscribe(ctx context.Context, exec sql.Executor, ch chan<- string, subscri
 		m[txid] = ch
 	})
 
-	return sync.OnceFunc(func() {
-		subscribers.Delete(txid)
+	return ch, sync.OnceFunc(func() {
+		if subscribers.Delete(txid) {
+			close(ch)
+		}
 	}), nil
 }
