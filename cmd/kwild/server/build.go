@@ -448,7 +448,7 @@ func restoreDB(d *coreDependencies) {
 
 	// Ensure that the snapshot file exists, if node is supposed to start with a snapshot state
 	if genCfg.DataAppHash != nil && appCfg.GenesisState == "" {
-		failBuild(nil, "snapshot file not provided")
+		failBuild(errors.New("no snapshot file"), "snapshot file not provided")
 	}
 
 	// Snapshot file exists
@@ -592,7 +592,7 @@ func buildStatesyncer(d *coreDependencies) *statesync.StateSyncer {
 	providers := strings.Split(d.cfg.ChainCfg.StateSync.RPCServers, ",")
 
 	if len(providers) == 0 {
-		failBuild(nil, "failed to configure state syncer, no remote servers provided.")
+		failBuild(errors.New("no provider"), "failed to configure state syncer, no remote servers provided.")
 	}
 
 	if len(providers) == 1 {
@@ -646,7 +646,7 @@ func buildStatesyncer(d *coreDependencies) *statesync.StateSyncer {
 	}
 
 	if !configDone {
-		failBuild(nil, "failed to configure state syncer, failed to fetch trust options from the remote server.")
+		failBuild(errors.New("no working provider"), "failed to configure state syncer, failed to fetch trust options from the remote server.")
 	}
 
 	// create state syncer

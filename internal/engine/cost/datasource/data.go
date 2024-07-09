@@ -8,37 +8,6 @@ import (
 	"github.com/kwilteam/kwil-db/internal/engine/cost/datatypes"
 )
 
-type ColumnValue interface {
-	Type() string
-	Value() any
-}
-
-type LiteralColumnValue struct {
-	value any
-}
-
-func (c *LiteralColumnValue) Type() string {
-	return fmt.Sprintf("%T", c.value)
-}
-
-func (c *LiteralColumnValue) Value() any {
-	return c.value
-}
-
-func NewLiteralColumnValue(v any) *LiteralColumnValue {
-	return &LiteralColumnValue{value: v}
-}
-
-type Row []ColumnValue
-
-func (r Row) String() string {
-	var cols []string
-	for _, c := range r {
-		cols = append(cols, fmt.Sprintf("%v", c.Value()))
-	}
-	return fmt.Sprintf("[%s]", strings.Join(cols, ", "))
-}
-
 type RowPipeline chan Row
 
 func newRowPipeline(rows []Row) RowPipeline {
@@ -71,7 +40,7 @@ func ResultFromRaw(s *datatypes.Schema, rows []Row) *Result {
 func (r *Result) ToCsv() string {
 	var sb strings.Builder
 	for _, f := range r.Schema.Fields {
-		sb.WriteString(fmt.Sprintf("%s", f.Name))
+		sb.WriteString(f.Name)
 		if f != r.Schema.Fields[len(r.Schema.Fields)-1] {
 			sb.WriteString(",")
 		}

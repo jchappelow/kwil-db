@@ -3,8 +3,13 @@ package demo
 import (
 	"context"
 	"fmt"
+
 	"github.com/kwilteam/kwil-db/core/types"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/costmodel"
 	"github.com/kwilteam/kwil-db/internal/engine/cost/internal/testkit"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/logical_plan"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/optimizer"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/optimizer/rules"
 	"github.com/kwilteam/kwil-db/internal/engine/cost/query_planner"
 	"github.com/kwilteam/kwil-db/parse"
 )
@@ -16,15 +21,17 @@ import (
 // the virtual plan in this pkg.
 func ExampleDemo() {
 	// NOTE!!!: this will fail, as 'parser' add sorting to every AST,
-	// but virutal plan does not support sorting yet.
+	// but virtual plan does not support sorting yet. (why? projection or push down issue?)
 	//
 	// See Example_ExecutionContext_execute instead, although it only shows how
 	// a logical plan is executed.
 
+	ctx := context.Background()
+
 	// enter engine
 	rawSql := "SELECT state, username FROM users WHERE age = 20"
 
-	pr, err := parse.ParseSQL(rawSql, &types.Schema{
+	ast, err := parse.ParseSQLWithoutValidation(rawSql, &types.Schema{
 		Name:   "",
 		Tables: []*types.Table{testkit.MockUsersSchemaTable},
 	})
@@ -33,24 +40,59 @@ func ExampleDemo() {
 		panic(err)
 	}
 
-	if pr.ParseErrs.Err() != nil {
-		panic(pr.ParseErrs.Err())
-	}
-
 	// load into engine
 	catalog := testkit.InitMockCatalog()
 
 	planner := query_planner.NewPlanner(catalog)
-	plan := planner.ToPlan(pr.AST)
+	plan := planner.ToPlan(ast)
 
 	//opt := optimizer.NewOptimizer()
 	//plan := opt.Optimize(plan)
 
-	ctx := NewExecutionContext()
-	res := ctx.Execute(context.TODO(), plan)
+	// ctx := NewExecutionContext()
+	// res := ctx.Execute(context.TODO(), plan) // field not found "id"
+
+	fmt.Printf("---Original plan---\n\n")
+	fmt.Println(logical_plan.Format(plan, 0))
+	r := &rules.ProjectionRule{}
+	optPlan := r.Transform(plan)
+
+	fmt.Printf("---After optimization---\n\n")
+	fmt.Println(logical_plan.Format(optPlan, 0))
+
+	relExp := costmodel.BuildRelExpr(optPlan)
+	cost := costmodel.EstimateCost(relExp)
+	fmt.Println("Init cost =", cost)
+
+	qp := optimizer.NewPlanner() // virtual planner
+	vp := qp.ToPlan(optPlan)
+
+	//fmt.Printf("---Got virtual plan---\n\n")
+	//fmt.Println(Format(vp, 0))
+	res := vp.Execute(ctx)
 	fmt.Println(res.ToCsv())
 
+	cost = vp.Cost() // VProjectionOp -> VFilterOp -> VSeqScanOp <= projectionCost + (filterEqCost + (seqScanRowCost * RowCount))
+	fmt.Println("Optim cost =", cost)
+
+	// TODO (@jchappelow): RowCount in statistics is still zero, set it
+
 	// Output:
+	// ---Original plan---
+	//
+	// Projection: users.state, users.username
+	//   Filter: users.age = 20
+	//     Scan: users
+	//
+	// ---After optimization---
+	//
+	// Projection: users.state, users.username
+	//   Filter: users.age = 20
+	//     Scan: users; projection=[age, state, username]
+	//
+	// Init cost = 505
 	// state,username
 	// CA,Adam
+	//
+	// Optim cost = 30
 }

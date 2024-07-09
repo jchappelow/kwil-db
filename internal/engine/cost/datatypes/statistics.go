@@ -14,14 +14,27 @@ type Statistics struct {
 }
 
 func (s *Statistics) String() string {
-	return fmt.Sprintf("RowCount: %d", s.RowCount)
+	var st strings.Builder
+	fmt.Fprintf(&st, "RowCount: %d", s.RowCount)
+	if len(s.ColumnStatistics) > 0 {
+		fmt.Fprintln(&st, "")
+	}
+	for i, cs := range s.ColumnStatistics {
+		fmt.Fprintf(&st, " Column %d:\n", i)
+		fmt.Fprintf(&st, " - Min/Max = %v / %v\n", cs.Min, cs.Max)
+		fmt.Fprintf(&st, " - NULL count = %v\n", cs.NullCount)
+	}
+	return st.String()
 }
+
 
 // ColumnStatistics contains statistics about a column.
 type ColumnStatistics struct {
-	NullCount     int64
-	Min           any
-	Max           any
+	NullCount int64
+	Min       any
+	Max       any
+
+	// These are harder
 	DistinctCount int64
 	AvgSize       int64
 

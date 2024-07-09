@@ -2,6 +2,7 @@ package testkit
 
 import (
 	"fmt"
+
 	"github.com/kwilteam/kwil-db/core/types"
 
 	ds "github.com/kwilteam/kwil-db/internal/engine/cost/datasource"
@@ -20,8 +21,10 @@ type mockCatalog struct {
 	dataSrcs map[string]ds.DataSource
 }
 
+// var _ query_planner.Catalog = (*mockCatalog)(nil)
+
 func (m *mockCatalog) GetDataSource(tableRef *dt.TableRef) (ds.DataSource, error) {
-	relName := tableRef.Table // for testing, we ignore the database name
+	relName := tableRef.Table // for testing, we ignore the namespace/schema
 	if _, ok := m.tables[relName]; !ok {
 		return nil, fmt.Errorf("table %s not found", relName)
 	}

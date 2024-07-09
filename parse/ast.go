@@ -473,7 +473,8 @@ type SQLStatement struct {
 	Position
 	CTEs []*CommonTableExpression
 	// SQL can be an insert, update, delete, or select statement.
-	SQL SQLCore
+	SQL      SQLCore
+	Mutative bool
 }
 
 func (s *SQLStatement) Accept(v Visitor) any {
@@ -605,6 +606,7 @@ func (r *ResultColumnWildcard) ResultColumnType() ResultColumnType {
 	return ResultColumnTypeWildcard
 }
 
+// Table is a table e.g. from a relation, subquery, function call, etc.
 type Table interface {
 	Node
 	table()
@@ -763,7 +765,8 @@ const (
 
 type ActionStmtSQL struct {
 	Position
-	SQL *SQLStatement
+	SQL      *SQLStatement
+	Mutative bool
 }
 
 func (a *ActionStmtSQL) Accept(v Visitor) any {

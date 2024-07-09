@@ -2,6 +2,7 @@ package virtual_plan
 
 import (
 	"fmt"
+
 	"github.com/kwilteam/kwil-db/internal/engine/cost/datasource"
 )
 
@@ -48,7 +49,7 @@ func (e *VColumnExpr) evaluate(row datasource.Row) datasource.ColumnValue {
 	return row[e.idx]
 }
 
-func compare(op string, a datasource.ColumnValue, b datasource.ColumnValue) bool {
+func compare(op string, a, b datasource.ColumnValue) bool {
 	if a.Type() != b.Type() {
 		panic(fmt.Sprintf("cannot compare %s and %s", a.Type(), b.Type()))
 	}
@@ -60,7 +61,7 @@ func compare(op string, a datasource.ColumnValue, b datasource.ColumnValue) bool
 		return a.Value().(bool) || b.Value().(bool)
 	case "=":
 		return a.Value() == b.Value()
-	case "!=":
+	case "!=", "<>":
 		return a.Value() != b.Value()
 	case ">":
 		return a.Value().(int) > b.Value().(int)
@@ -73,8 +74,6 @@ func compare(op string, a datasource.ColumnValue, b datasource.ColumnValue) bool
 	default:
 		panic(fmt.Sprintf("unknown operator %s", op))
 	}
-
-	return true
 }
 
 func VColumn(idx int) VirtualExpr {

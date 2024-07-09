@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"slices"
 	"unsafe"
 
@@ -99,7 +100,12 @@ func (ds *CsvDataSource) collectStats() {
 }
 
 func (ds *CsvDataSource) load() error {
-	in, err := os.Open(ds.path)
+	path, err := filepath.Abs(ds.path)
+	if err != nil {
+		return err
+	}
+
+	in, err := os.Open(path)
 	if err != nil {
 		return err
 	}
@@ -167,7 +173,7 @@ func (ds *CsvDataSource) Statistics() *datatypes.Statistics {
 }
 
 func (ds *CsvDataSource) Scan(ctx context.Context, projection ...string) *Result {
-	return dsScan(ctx, ds.schema, ds.records, projection)
+	return ScanData(ctx, ds.schema, ds.records, projection)
 }
 
 func (ds *CsvDataSource) SourceType() SourceType {

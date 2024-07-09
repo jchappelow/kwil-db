@@ -2,7 +2,8 @@ package optimizer
 
 import (
 	"github.com/kwilteam/kwil-db/internal/engine/cost/logical_plan"
-	"github.com/kwilteam/kwil-db/internal/engine/cost/virtual_plan"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/optimizer/rules"
+	"github.com/kwilteam/kwil-db/internal/engine/cost/optimizer/virtual_plan"
 )
 
 type LogicalOptimizeRule interface {
@@ -13,12 +14,14 @@ type Optimizer struct {
 	rules []LogicalOptimizeRule
 }
 
+// NewOptimizer creates a new optimizer with some default rules, including
+// ProjectionRule and PredicatePushDownRule.
 func NewOptimizer() *Optimizer {
 	return &Optimizer{
 		rules: []LogicalOptimizeRule{
 			// default rules on logical plan
-			&PredicatePushDownRule{},
-			&ProjectionRule{},
+			&rules.PredicatePushDownRule{},
+			&rules.ProjectionRule{},
 		},
 	}
 }
@@ -95,6 +98,7 @@ func (o *Optimizer) Optimize(plan logical_plan.LogicalPlan) virtual_plan.Virtual
 	panic("not implemented")
 }
 
+// virtualRewrite does ???
 func (o *Optimizer) virtualRewrite(plan logical_plan.LogicalPlan) logical_plan.LogicalPlan {
 	panic("not implemented")
 }
