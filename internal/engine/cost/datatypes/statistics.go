@@ -1,5 +1,10 @@
 package datatypes
 
+import (
+	"fmt"
+	"strings"
+)
+
 // Statistics contains statistics about a table or a Plan. A Statistics can be
 // derived directly from the underlying table, or derived from the statistics of
 // its children.
