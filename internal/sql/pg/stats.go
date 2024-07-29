@@ -342,8 +342,11 @@ func TableStats(ctx context.Context, table string, db sql.Executor) (*costtypes.
 var ErrNaN = errors.New("NaN")
 
 func pgNumericToDecimal(num pgtype.Numeric) (*decimal.Decimal, error) {
-	if num.NaN {
+	if num.NaN { // TODO: create a decimal.Decimal that supports NaN
 		return nil, ErrNaN
+	}
+	if !num.Valid {
+		return nil, errors.New("invalid or null") // TODO: create a decimal.Decimal that supports NULL
 	}
 
 	i, e := num.Int, num.Exp

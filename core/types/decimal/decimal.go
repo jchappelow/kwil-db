@@ -31,10 +31,13 @@ var (
 	maxPrecision = uint16(1000)
 )
 
-// Decimal is a decimal number. It has a set precision and scale that
-// will be used on all mathematical operations that are methods of the
-// Decimal type. To perform mathematical operations with maximum precision
-// and scale, use the math functions in this package instead of the methods.
+// Decimal is a decimal number. It has a set precision and scale that will be
+// used on all mathematical operations that are methods of the Decimal type. To
+// perform mathematical operations with maximum precision and scale, use the
+// math functions in this package instead of the methods.
+//
+// TODO: support NULL column values (e.g. from pgtype.Numeric.Valid == false),
+// and non-NULL but NaN/+Inf/-Inf.
 type Decimal struct {
 	dec       apd.Decimal
 	scale     uint16
@@ -293,6 +296,33 @@ func (d *Decimal) Scan(src interface{}) error {
 }
 
 var _ sql.Scanner = &Decimal{}
+
+type NullDecimal struct {
+	Valid bool
+	Dec   Decimal
+}
+
+func (d NullDecimal) Value() (driver.Value, error) {
+	if d.Valid {
+		return nil, nil
+	}
+	return d.Dec.Value()
+}
+
+var _ driver.Valuer = &NullDecimal{}
+
+// Scan implements the database/sql.Scanner interface.
+func (d *NullDecimal) Scan(src interface{}) error {
+	// var nd apd.NullDecimal
+	// err := nd.Scan(src)
+	if src == nil {
+		d.Valid = true
+		return nil
+	}
+	return d.Dec.Scan(src)
+}
+
+var _ sql.Scanner = &NullDecimal{}
 
 // Abs returns the absolute value of the decimal.
 func (d *Decimal) Abs() (*Decimal, error) {
