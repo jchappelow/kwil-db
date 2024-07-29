@@ -197,7 +197,7 @@ func query(ctx context.Context, oidToDataType map[uint32]*datatype, cq connQuery
 		}
 		oids := make([]uint32, len(pgxVals))
 		for i, v := range row.FieldDescriptions() {
-			oids[i] = v.DataTypeOID
+			oids[i] = v.DataTypeOID // NOTE: for a domain (alias) this will be the OID of the underlying type
 		}
 		return decodeFromPG(pgxVals, oids, oidToDataType)
 	})

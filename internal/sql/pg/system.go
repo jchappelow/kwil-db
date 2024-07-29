@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/kwilteam/kwil-db/common/sql"
+	"github.com/kwilteam/kwil-db/core/types"
 )
 
 const (
@@ -309,11 +310,13 @@ func scanVal(ct ColType) any {
 	case ColTypeBool:
 		return new(pgtype.Bool)
 	case ColTypeByteA:
-		return new([]byte)
+		return new([]byte) // this is nil-able
 	case ColTypeUUID:
 		return new(pgtype.UUID)
 	case ColTypeNumeric:
-		return new(pgtype.Numeric)
+		return new(pgtype.Numeric) // or decimal.Decimal
+	case ColTypeUINT256:
+		return new(types.Uint256)
 	case ColTypeFloat:
 		return new(pgtype.Float8)
 	case ColTypeTime:
@@ -338,6 +341,8 @@ func scanArrayVal(ct ColType) any {
 		return pgArray[pgtype.UUID]()
 	case ColTypeNumeric:
 		return pgArray[pgtype.Numeric]()
+	case ColTypeUINT256:
+		return new(types.Uint256Array)
 	case ColTypeFloat:
 		return pgArray[pgtype.Float8]()
 	case ColTypeTime:
@@ -380,6 +385,7 @@ const (
 	ColTypeByteA   ColType = "bytea"
 	ColTypeUUID    ColType = "uuid"
 	ColTypeNumeric ColType = "numeric"
+	ColTypeUINT256 ColType = "uint256"
 	ColTypeFloat   ColType = "float"
 	ColTypeTime    ColType = "timestamp"
 
@@ -389,6 +395,7 @@ const (
 	ColTypeByteAArray   ColType = "bytea[]"
 	ColTypeUUIDArray    ColType = "uuid[]"
 	ColTypeNumericArray ColType = "numeric[]"
+	ColTypeUINT256Array ColType = "uint256[]"
 	ColTypeFloatArray   ColType = "float[]"
 	ColTypeTimeArray    ColType = "timestamp[]"
 
@@ -409,6 +416,8 @@ func arrayType(ct ColType) ColType {
 		return ColTypeUUIDArray
 	case ColTypeNumeric:
 		return ColTypeNumericArray
+	case ColTypeUINT256:
+		return ColTypeUINT256Array
 	case ColTypeFloat:
 		return ColTypeFloatArray
 	case ColTypeTime:
@@ -445,6 +454,9 @@ func (ci *ColInfo) baseType() ColType {
 	}
 	if ci.IsNumeric() {
 		return ColTypeNumeric
+	}
+	if ci.IsUINT256() {
+		return ColTypeUINT256
 	}
 	if ci.IsFloat() {
 		return ColTypeFloat
@@ -507,12 +519,17 @@ func (ci *ColInfo) IsByteA() bool {
 	return false
 }
 
-func (ci *ColInfo) IsNumeric() bool {
-	dt := strings.ToLower(ci.DataType)
-	if strings.HasPrefix(dt, "numeric") {
+func (ci *ColInfo) IsUINT256() bool {
+	switch strings.ToLower(ci.DataType) {
+	case "uint256":
 		return true
 	}
-	return dt == "uint256"
+	return false
+}
+
+func (ci *ColInfo) IsNumeric() bool {
+	dt := strings.ToLower(ci.DataType)
+	return strings.HasPrefix(dt, "numeric")
 }
 
 func (ci *ColInfo) IsTime() bool {
@@ -524,16 +541,22 @@ func columnInfo(ctx context.Context, conn *pgx.Conn, tbl string) ([]ColInfo, err
 	var colInfo []ColInfo
 
 	// get column data types
-	sql := `SELECT ordinal_position, column_name, data_type, udt_name::regtype, is_nullable, column_default
+	sql := `SELECT ordinal_position, column_name,
+			data_type, udt_name::regtype, domain_name::regtype,
+			is_nullable, column_default
         FROM information_schema.columns
         WHERE table_name = '` + tbl + `'`
 
 	var pos int
+	var domainName pgtype.Text // null in Valid bool
 	var colName, dataType, typeOrArray, isNullable string
 	var colDefault any
-	scans := []any{&pos, &colName, &typeOrArray, &dataType, &isNullable, &colDefault}
+	scans := []any{&pos, &colName, &typeOrArray, &dataType, &domainName, &isNullable, &colDefault}
 	err := queryRowFunc(ctx, conn, sql, scans, func() error {
 		isArray := strings.EqualFold(typeOrArray, "ARRAY")
+		if domainName.Valid && domainName.String != "" {
+			dataType = domainName.String
+		}
 		var wasArr bool
 		dataType, wasArr = strings.CutSuffix(dataType, "[]")
 		if isArray && !wasArr {

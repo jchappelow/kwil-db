@@ -3,13 +3,14 @@ package pg
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"math/big"
 	"reflect"
 	"strconv"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/kwilteam/kwil-db/common/sql"
 	"github.com/kwilteam/kwil-db/core/types"
 	"github.com/kwilteam/kwil-db/core/types/decimal"
 )
@@ -198,7 +199,12 @@ var (
 		ExtraOIDs:      []uint32{pgtype.Int2OID, pgtype.Int4OID},
 		EncodeInferred: defaultEncodeDecode,
 		Decode: func(a any) (any, error) {
-			switch v := a.(type) {
+			v, ok := sql.Int64(a)
+			if !ok {
+				return nil, fmt.Errorf("unexpected type %T", a)
+			}
+			return v, nil
+			/*switch v := a.(type) {
 			case int:
 				return int64(v), nil
 			case int8:
@@ -217,9 +223,11 @@ var (
 				return int64(v), nil
 			case uint64:
 				return int64(v), nil
+
+			// pgtype.INT8 etc. ???
 			default:
 				return nil, fmt.Errorf("unexpected type %T", a)
-			}
+			}*/
 		},
 		SerializeChangeset: func(value string) ([]byte, error) {
 			intVal, err := strconv.ParseInt(value, 10, 64)
@@ -467,25 +475,7 @@ var (
 				return nil, fmt.Errorf("expected pgtype.Numeric, got %T", a)
 			}
 
-			if pgType.NaN {
-				return "NaN", nil
-			}
-
-			// if we give postgres a number such as 5000, it will return it as 5 with exponent 3.
-			// Since kwil's decimal semantics do not allow negative scale, we need to multiply
-			// the number by 10^exp to get the correct value.
-			if pgType.Exp > 0 {
-				z := new(big.Int)
-				z.Exp(big.NewInt(10), big.NewInt(int64(pgType.Exp)), nil)
-				z.Mul(z, pgType.Int)
-				pgType.Int = z
-				pgType.Exp = 0
-			}
-
-			// there is a bit of an edge case here, where uint256 can be returned.
-			// since most results simply get returned to the user via JSON, it doesn't
-			// matter too much right now, so we'll leave it as-is.
-			return decimal.NewFromBigInt(pgType.Int, pgType.Exp)
+			return pgNumericToDecimal(pgType)
 		},
 		SerializeChangeset: func(value string) ([]byte, error) {
 			// parse to ensure it is a valid decimal, then re-encode it to ensure it is in the correct format.
@@ -581,17 +571,18 @@ var (
 				return nil, fmt.Errorf("expected pgtype.Numeric, got %T", a)
 			}
 
-			// if the number ends in 0s, it will have an exponent, so we need to multiply
-			// the number by 10^exp to get the correct value.
-			if pgType.Exp > 0 {
-				z := new(big.Int)
-				z.Exp(big.NewInt(10), big.NewInt(int64(pgType.Exp)), nil)
-				z.Mul(z, pgType.Int)
-				pgType.Int = z
-				pgType.Exp = 0
+			if pgType.Exp == 0 {
+				return types.Uint256FromBig(pgType.Int)
 			}
 
-			return types.Uint256FromBig(pgType.Int)
+			dec, err := pgNumericToDecimal(pgType)
+			if err != nil {
+				return nil, err
+			}
+			if dec.Exp() != 0 {
+				return nil, errors.New("fractional numeric")
+			}
+			return types.Uint256FromBig(dec.BigInt())
 		},
 		SerializeChangeset: func(value string) ([]byte, error) {
 			// parse to ensure it is a valid uint256, then re-encode it to ensure it is in the correct format.
