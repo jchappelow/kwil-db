@@ -127,6 +127,7 @@ func (p *ProcedureContext) NewScope() *ProcedureContext {
 		Procedure:  p.Procedure,
 		StackDepth: p.StackDepth,
 		UsedGas:    p.UsedGas,
+		GasLimit:   p.GasLimit,
 		Height:     p.Height,
 	}
 }

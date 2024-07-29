@@ -537,15 +537,24 @@ func (ci *ColInfo) IsTime() bool {
 	return strings.HasPrefix(dt, "timestamp")
 }
 
-func columnInfo(ctx context.Context, conn *pgx.Conn, tbl string) ([]ColInfo, error) {
+func columnInfo(ctx context.Context, conn *pgx.Conn, schema, tbl string) ([]ColInfo, error) {
 	var colInfo []ColInfo
+
+	if schema == "" {
+		schema = "public" // otherwise we can get multiple rows
+	}
+
+	dbName := conn.Config().Database
 
 	// get column data types
 	sql := `SELECT ordinal_position, column_name,
 			data_type, udt_name::regtype, domain_name::regtype,
 			is_nullable, column_default
         FROM information_schema.columns
-        WHERE table_name = '` + tbl + `'`
+        WHERE table_name = '` + tbl + `' AND table_schema = '` + schema + `'
+			AND table_catalog = '` + dbName + `'`
+
+	var worked bool
 
 	var pos int
 	var domainName pgtype.Text // null in Valid bool
@@ -565,10 +574,16 @@ func columnInfo(ctx context.Context, conn *pgx.Conn, tbl string) ([]ColInfo, err
 		colInfo = append(colInfo, ColInfo{pos, colName, dataType,
 			isArray,
 			strings.EqualFold(isNullable, "YES"), colDefault})
+
+		worked = true
 		return nil
 	})
 	if err != nil {
 		return nil, err
+	}
+
+	if !worked {
+		return nil, fmt.Errorf("no results for table %s.%s", schema, tbl)
 	}
 
 	slices.SortFunc(colInfo, func(a, b ColInfo) int {
@@ -578,13 +593,13 @@ func columnInfo(ctx context.Context, conn *pgx.Conn, tbl string) ([]ColInfo, err
 	return colInfo, nil
 }
 
-func ColumnInfo(ctx context.Context, tx sql.Executor, tbl string) ([]ColInfo, error) {
+func ColumnInfo(ctx context.Context, tx sql.Executor, schema, tbl string) ([]ColInfo, error) {
 	conner, ok := tx.(conner)
 	if !ok {
 		return nil, errors.New("no conn access")
 	}
 	conn := conner.Conn()
-	return columnInfo(ctx, conn, tbl)
+	return columnInfo(ctx, conn, schema, tbl)
 }
 
 func verifySettings(ctx context.Context, conn *pgx.Conn) error {

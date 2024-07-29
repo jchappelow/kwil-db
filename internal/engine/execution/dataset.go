@@ -52,23 +52,37 @@ var (
 // statistics must be updated for efficiently. TODO: figure out what column
 // stats can be updated, and which if any need to use the DB transaction's
 // changeset to reestablish completely accurate stats
-func (d *baseDataset) buildStats(ctx context.Context, db sql.Executor) (map[string]*costtypes.Statistics, error) {
-	return buildStats(ctx, d.schema, db)
-}
-
-func buildStats(ctx context.Context, schema *types.Schema, db sql.Executor) (map[string]*costtypes.Statistics, error) {
-	// Statistics. Check statistics tables? Recompute full on start?
-	stats := map[string]*costtypes.Statistics{}
+func buildStats(ctx context.Context, schema *types.Schema, db sql.Executor,
+	meta map[costtypes.TableRef]*tableMeta) error {
 	pgSchema := dbidSchema(schema.DBID())
 	for _, table := range schema.Tables {
-		qualifiedTable := pgSchema + "." + table.Name
-		tblStats, err := pg.TableStats(ctx, qualifiedTable, db)
-		if err != nil {
-			return nil, err
+		tableRef := costtypes.TableRef{
+			Namespace: pgSchema, // actually "ds_<dbid>"
+			Table:     table.Name,
 		}
-		stats[table.Name] = tblStats
+
+		tableFields := make([]costtypes.Field, len(table.Columns))
+		for i, col := range table.Columns {
+			dataType := col.Type.Name // TODO: convert or standardize across
+			nullable := !col.HasAttribute(types.NOT_NULL)
+			tableFields[i] = costtypes.NewFieldWithRelation(col.Name, dataType, nullable, &tableRef)
+		}
+
+		// qualifiedTable := pgSchema + "." + table.Name
+		stats, err := pg.TableStats(ctx, pgSchema, table.Name, db)
+		if err != nil {
+			return err
+		}
+
+		costSchema := &costtypes.Schema{Fields: tableFields}
+
+		meta[tableRef] = &tableMeta{
+			schema: costSchema,
+			stats:  stats,
+		}
+		// query_planner.NewPlanner(cat)
 	}
-	return stats, nil
+	return nil
 }
 
 func (d *baseDataset) extCall(scope *precompiles.ProcedureContext,

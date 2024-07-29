@@ -80,7 +80,7 @@ func TestColumnInfo(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cols, err := ColumnInfo(ctx, tx, tbl)
+	cols, err := ColumnInfo(ctx, tx, "", tbl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -125,7 +125,7 @@ func TestQueryRowFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cols, err := ColumnInfo(ctx, tx, tbl)
+	cols, err := ColumnInfo(ctx, tx, "", tbl)
 	if err != nil {
 		t.Fatal(err)
 	}

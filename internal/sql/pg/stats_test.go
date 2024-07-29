@@ -37,7 +37,7 @@ func TestTableStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	cols, err := ColumnInfo(ctx, tx, tbl)
+	cols, err := ColumnInfo(ctx, tx, "", tbl)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestTableStats(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	stats, err := TableStats(ctx, tbl, tx)
+	stats, err := TableStats(ctx, "", tbl, tx)
 	require.NoError(t, err)
 
 	// spew.Config.DisableMethods = true

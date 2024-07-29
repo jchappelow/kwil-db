@@ -181,6 +181,9 @@ func NewGlobalContext(ctx context.Context, db sql.Executor, extensionInitializer
 		initializers: extensionInitializers,
 		datasets:     make(map[string]*baseDataset),
 		service:      service,
+		catalog: catalog{
+			meta: map[costtypes.TableRef]*tableMeta{},
+		},
 	}
 
 	schemas, err := getSchemas(ctx, db, nil)
@@ -192,20 +195,14 @@ func NewGlobalContext(ctx context.Context, db sql.Executor, extensionInitializer
 	// if one schema is dependent on another, it must be loaded after the other
 	// this is handled by the orderSchemas function
 	for _, schema := range orderSchemas(schemas) {
-		_, err := g.loadDataset(ctx, schema, db)
+		_, err := g.loadDataset(ctx, schema)
 		if err != nil {
 			return nil, fmt.Errorf("%w: schema (%s / %s / %s)", err, schema.Name, schema.DBID(), schema.Owner)
 		}
 
-		// Statistics. Check statistics tables? Recompute full on start?
-		// stats, err := dataset.buildStats(ctx, db)
-		// if err != nil {
-		// 	return nil, err
-		// }
-		// for tableRef, meta := range g.catalog.meta {
-		// 	stats[tableRef.Table]
-		// }
-		// g.catalog.
+		if err = g.buildStats(ctx, schema, db); err != nil {
+			return nil, err
+		}
 	}
 
 	return g, nil
@@ -223,8 +220,11 @@ func (g *GlobalContext) Reload(ctx context.Context, db sql.Executor) error {
 	}
 
 	for _, schema := range orderSchemas(schemas) {
-		_, err := g.loadDataset(ctx, schema, db)
+		_, err := g.loadDataset(ctx, schema)
 		if err != nil {
+			return err
+		}
+		if err = g.buildStats(ctx, schema, db); err != nil {
 			return err
 		}
 	}
@@ -244,7 +244,7 @@ func (g *GlobalContext) CreateDataset(ctx context.Context, tx sql.DB, schema *ty
 	}
 	schema.Owner = txdata.Signer
 
-	_, err = g.loadDataset(ctx, schema, tx)
+	_, err = g.loadDataset(ctx, schema)
 	if err != nil {
 		return err
 	}
@@ -258,7 +258,7 @@ func (g *GlobalContext) CreateDataset(ctx context.Context, tx sql.DB, schema *ty
 	}
 
 	// update the catalog (fields and stats), the tables should be empty though
-	return nil // dataset.buildStats(ctx, tx)
+	return g.buildStats(ctx, schema, tx)
 }
 
 // DeleteDataset deletes a dataset.
@@ -312,6 +312,7 @@ func (g *GlobalContext) Procedure(ctx context.Context, tx sql.DB, options *commo
 		TxID:      options.TxID,
 		Height:    options.Height,
 		// starting with stack depth 0, increment in each action call
+		GasLimit: 10000000,
 	}
 
 	tx2, err := tx.BeginTx(ctx)
@@ -434,49 +435,24 @@ func (g *GlobalContext) Execute(ctx context.Context, tx sql.DB, dbid, query stri
 
 type dbQueryFn func(ctx context.Context, stmt string, args ...any) (*sql.ResultSet, error)
 
+func (g *GlobalContext) buildStats(ctx context.Context, schema *types.Schema, db sql.Executor) error {
+	dbid := schema.DBID()
+
+	_, ok := g.datasets[dbid]
+	if !ok {
+		return fmt.Errorf("%w: %s", ErrDatasetNotFound, dbid)
+	}
+
+	return buildStats(ctx, schema, db, g.catalog.meta)
+}
+
 // loadDataset loads a dataset into the global context.
 // It does not create the dataset in the datastore.
-func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema, db sql.Executor) (*baseDataset, error) {
+func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) (*baseDataset, error) {
 	dbid := schema.DBID()
 	_, ok := g.initializers[dbid]
 	if ok {
 		return nil, fmt.Errorf("%w: %s", ErrDatasetExists, dbid)
-	}
-
-	// The query_planner.Catalog must a costtypes.Schema and a
-	// datasource.DataSource for a pg schema-qualified table.
-	for _, table := range schema.Tables {
-		rel := &costtypes.TableRef{
-			Namespace: dbid, // actually "ds_<dbid>"
-			Table:     table.Name,
-		}
-		tableFields := make([]costtypes.Field, len(table.Columns))
-		for i, col := range table.Columns {
-			dataType := col.Type.Name // TODO: convert or standardize across
-			nullable := !col.HasAttribute(types.NOT_NULL)
-			tableFields[i] = costtypes.NewFieldWithRelation(col.Name, dataType, nullable, rel)
-		}
-
-		pgSchema := dbidSchema(dbid)
-		qualifiedTable := pgSchema + "." + table.Name
-
-		stats, err := pg.TableStats(ctx, qualifiedTable, db)
-		if err != nil {
-			return nil, err
-		}
-
-		costSchema := &costtypes.Schema{Fields: tableFields}
-
-		tableRef := costtypes.TableRef{
-			Namespace: pgSchema, // or just dbid?
-			Table:     table.Name,
-		}
-
-		g.catalog.meta[tableRef] = &tableMeta{
-			schema: costSchema,
-			stats:  stats,
-		}
-		// query_planner.NewPlanner(cat)
 	}
 
 	datasetCtx := &baseDataset{

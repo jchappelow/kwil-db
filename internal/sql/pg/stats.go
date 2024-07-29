@@ -15,7 +15,7 @@ import (
 	costtypes "github.com/kwilteam/kwil-db/internal/engine/cost/datatypes"
 )
 
-func TableStats(ctx context.Context, table string, db sql.Executor) (*costtypes.Statistics, error) {
+func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*costtypes.Statistics, error) {
 	// table stats:
 	//  1. row count
 	//  2. per-column stats
@@ -25,12 +25,15 @@ func TableStats(ctx context.Context, table string, db sql.Executor) (*costtypes.
 	//		d. average record size ?
 	//		e. ???
 
-	qualifiedTable := table // pgSchema + "." + table
+	if schema == "" {
+		schema = "public"
+	}
+	qualifiedTable := schema + "." + table
 
 	// row count
 	res, err := db.Execute(ctx, fmt.Sprintf(`SELECT count(*) FROM %s`, qualifiedTable))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("unable to count rows: %w", err)
 	}
 	count, ok := sql.Int64(res.Rows[0][0])
 	if !ok {
@@ -39,7 +42,7 @@ func TableStats(ctx context.Context, table string, db sql.Executor) (*costtypes.
 	// TODO: We needs a schema-table stats database so we don't ever have to do
 	// a full table scan for column stats.
 
-	colInfo, err := ColumnInfo(ctx, db, qualifiedTable)
+	colInfo, err := ColumnInfo(ctx, db, schema, table)
 	if err != nil {
 		return nil, err
 	}
