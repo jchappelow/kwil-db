@@ -12,6 +12,8 @@ import (
 	"github.com/kwilteam/kwil-db/core/types"
 	"github.com/kwilteam/kwil-db/core/types/testdata"
 	"github.com/kwilteam/kwil-db/extensions/precompiles"
+	costtypes "github.com/kwilteam/kwil-db/internal/engine/cost/datatypes"
+	"github.com/kwilteam/kwil-db/internal/sql/pg"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -379,6 +381,16 @@ func newDB(readonly bool) *mockDB {
 		accessMode:    am,
 		dbs:           make(map[string][]byte),
 		executedStmts: make([]string, 0),
+		colInfoRes: []pg.ColInfo{
+			{
+				Name: "a",
+				Pos:  1,
+			},
+			{
+				Name: "b",
+				Pos:  2,
+			},
+		},
 	}
 }
 
@@ -395,6 +407,8 @@ type mockDB struct {
 	dbs           map[string][]byte // serialized schemas
 	executedStmts []string
 	resultSet     *sql.ResultSet
+
+	colInfoRes []pg.ColInfo // colInfos map[string]pg.ColInfo
 }
 
 var _ sql.AccessModer = (*mockDB)(nil)
@@ -428,6 +442,18 @@ func (m *mockDB) Execute(ctx context.Context, stmt string, args ...any) (*sql.Re
 	case sqlDeleteKwilSchema:
 		delete(m.dbs, args[0].(string))
 	default:
+		// pg.TableStats queries: commented since we're satisfying various
+		// interfaces like RowCounter, ColumnInfoer, and ColStatser instead
+		// since that's easier and less brittle than trying to match and parse
+		// the statements used by pg.TableStats.
+
+		// if strings.HasPrefix(stmt, `SELECT count(1) FROM ds_`) {
+		// 	return &sql.ResultSet{
+		// 		Columns: []string{},
+		// 		Rows:    [][]any{{1}},
+		// 	}, nil
+		// }
+
 		m.executedStmts = append(m.executedStmts, stmt)
 
 		if m.resultSet != nil {
@@ -439,6 +465,25 @@ func (m *mockDB) Execute(ctx context.Context, stmt string, args ...any) (*sql.Re
 		Columns: []string{},
 		Rows:    [][]any{},
 	}, nil
+}
+
+var _ pg.RowCounter = (*mockDB)(nil)
+
+func (m *mockDB) RowCount(ctx context.Context, qualifiedTable string) (int64, error) {
+	return 0, nil
+}
+
+var _ pg.ColumnInfoer = (*mockDB)(nil)
+
+func (m *mockDB) ColumnInfo(ctx context.Context, schema, tbl string) ([]pg.ColInfo, error) {
+	return m.colInfoRes, nil
+}
+
+var _ pg.ColStatser = (*mockDB)(nil)
+
+func (m *mockDB) ColStats(ctx context.Context, qualifiedTable string, colInfo []pg.ColInfo) ([]costtypes.ColumnStatistics, error) {
+	// m.colStats
+	return make([]costtypes.ColumnStatistics, len(colInfo)), nil
 }
 
 type mockTx struct {
