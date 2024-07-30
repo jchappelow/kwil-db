@@ -15,6 +15,27 @@ import (
 	costtypes "github.com/kwilteam/kwil-db/internal/engine/cost/datatypes"
 )
 
+type RowCounter interface {
+	RowCount(ctx context.Context, qualifiedTable string) (int64, error)
+}
+
+func RowCount(ctx context.Context, qualifiedTable string, db sql.Executor) (int64, error) {
+	if rc, ok := db.(RowCounter); ok {
+		return rc.RowCount(ctx, qualifiedTable)
+	}
+
+	stmt := fmt.Sprintf(`SELECT count(1) FROM %s`, qualifiedTable)
+	res, err := db.Execute(ctx, stmt)
+	if err != nil {
+		return 0, fmt.Errorf("unable to count rows: %w", err)
+	}
+	count, ok := sql.Int64(res.Rows[0][0])
+	if !ok {
+		return 0, fmt.Errorf("no row count for %s", qualifiedTable)
+	}
+	return count, nil
+}
+
 func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*costtypes.Statistics, error) {
 	// table stats:
 	//  1. row count
@@ -31,13 +52,9 @@ func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*co
 	qualifiedTable := schema + "." + table
 
 	// row count
-	res, err := db.Execute(ctx, fmt.Sprintf(`SELECT count(*) FROM %s`, qualifiedTable))
+	count, err := RowCount(ctx, qualifiedTable, db)
 	if err != nil {
-		return nil, fmt.Errorf("unable to count rows: %w", err)
-	}
-	count, ok := sql.Int64(res.Rows[0][0])
-	if !ok {
-		return nil, fmt.Errorf("no row count for %s", qualifiedTable)
+		return nil, err
 	}
 	// TODO: We needs a schema-table stats database so we don't ever have to do
 	// a full table scan for column stats.
@@ -46,12 +63,35 @@ func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*co
 	if err != nil {
 		return nil, err
 	}
+
+	// Column statistics
+	colStats, err := colStats(ctx, qualifiedTable, colInfo, db)
+	if err != nil {
+		return nil, err
+	}
+
+	return &costtypes.Statistics{
+		RowCount:         count,
+		ColumnStatistics: colStats,
+	}, nil
+}
+
+type ColStatser interface {
+	ColStats(ctx context.Context, qualifiedTable string, colInfo []ColInfo) ([]costtypes.ColumnStatistics, error)
+}
+
+func colStats(ctx context.Context, qualifiedTable string, colInfo []ColInfo, db sql.Executor) ([]costtypes.ColumnStatistics, error) {
+	if cs, ok := db.(ColStatser); ok {
+		return cs.ColStats(ctx, qualifiedTable, colInfo)
+	}
+
 	numCols := len(colInfo)
 	colTypes := make([]ColType, numCols)
 	for i := range colInfo {
 		colTypes[i] = colInfo[i].Type()
 	}
 	// fmt.Println(colTypes)
+
 	colStats := make([]costtypes.ColumnStatistics, numCols)
 
 	// iterate over all rows (select *)
@@ -59,9 +99,10 @@ func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*co
 	for _, col := range colInfo {
 		scans = append(scans, col.ScanVal()) // for QueryRowFunc
 	}
-	err = QueryRowFunc(ctx, db, `SELECT * FROM `+qualifiedTable, scans,
+	err := QueryRowFunc(ctx, db, `SELECT * FROM `+qualifiedTable, scans,
 		// func(_ []FieldDesc, vals []any) error { // for QueryRowFuncAny
 		func() error {
+			var err error
 			for i, val := range scans {
 				stat := &colStats[i]
 				if val == nil { // with QueryRowFuncAny and vals []any, or with QueryRowFunc where scans are native type pointers
@@ -336,10 +377,7 @@ func TableStats(ctx context.Context, schema, table string, db sql.Executor) (*co
 		return nil, err
 	}
 
-	return &costtypes.Statistics{
-		RowCount:         count,
-		ColumnStatistics: colStats,
-	}, nil
+	return colStats, nil
 }
 
 var ErrNaN = errors.New("NaN")

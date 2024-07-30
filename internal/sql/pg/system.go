@@ -593,13 +593,19 @@ func columnInfo(ctx context.Context, conn *pgx.Conn, schema, tbl string) ([]ColI
 	return colInfo, nil
 }
 
+type ColumnInfoer interface {
+	ColumnInfo(ctx context.Context, schema, tbl string) ([]ColInfo, error)
+}
+
 func ColumnInfo(ctx context.Context, tx sql.Executor, schema, tbl string) ([]ColInfo, error) {
-	conner, ok := tx.(conner)
-	if !ok {
-		return nil, errors.New("no conn access")
+	switch ti := tx.(type) {
+	case conner:
+		conn := ti.Conn()
+		return columnInfo(ctx, conn, schema, tbl)
+	case ColumnInfoer:
+		return ti.ColumnInfo(ctx, schema, tbl)
 	}
-	conn := conner.Conn()
-	return columnInfo(ctx, conn, schema, tbl)
+	return nil, errors.New("cannot get column info")
 }
 
 func verifySettings(ctx context.Context, conn *pgx.Conn) error {
