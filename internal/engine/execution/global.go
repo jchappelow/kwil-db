@@ -397,7 +397,7 @@ func (g *GlobalContext) DeleteDataset(ctx context.Context, tx sql.DB, dbid strin
 		return fmt.Errorf(`cannot delete dataset "%s", not owner`, dbid)
 	}
 
-	err := deleteSchema(ctx, tx, dbid)
+	err := deleteSchema(ctx, tx, dataset.schema)
 	if err != nil {
 		return errors.Join(err, ErrDBInternal)
 	}
@@ -664,6 +664,20 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) (
 // unloadDataset unloads a dataset from the global context.
 // It does not delete the dataset from the datastore.
 func (g *GlobalContext) unloadDataset(dbid string) {
+	// perform stats cleanup
+	dataset := g.datasets[dbid]
+	pgSchema := dbidSchema(dbid)
+	for _, tbl := range dataset.schema.Tables {
+		ref := sql.TableRef{Namespace: pgSchema, Table: tbl.Name}
+		// delete(g.catalog.stats, ref)
+
+		// This ^ is not optimal as stats updates are ideally done in ONE place.
+		// Also, this would happen when the tx is executed PRIOR to the
+		// streaming updates that create the changeset and do other statistics updates.
+
+		g.service.Logger.S.Infof("unloading dataset for table %v", ref)
+	}
+
 	delete(g.datasets, dbid)
 	delete(g.initializers, dbid)
 }

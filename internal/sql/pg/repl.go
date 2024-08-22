@@ -27,6 +27,7 @@ import (
 	"github.com/jackc/pgx/v5/pgproto3"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/kwilteam/kwil-db/common/sql"
 	"github.com/kwilteam/kwil-db/core/log"
 )
 
@@ -283,7 +284,7 @@ func captureRepl(ctx context.Context, conn *pgconn.PgConn, startLSN uint64, comm
 			}
 
 		default:
-			logger.Debug("unknown message", log.String("type", string(msg.Data[0])))
+			logger.Warn("unknown message", log.String("type", string(msg.Data[0])))
 		}
 	}
 }
@@ -419,7 +420,30 @@ func decodeWALData(hasher hash.Hash, walData []byte, relations map[uint32]*pglog
 
 		relName := rel.Namespace + "." + rel.RelationName
 		if !okSchema(rel.Namespace) {
-			// logger.Debugf("ignoring update to relation %v", relName)
+			if relName == "kwild_internal.kwil_schemas" {
+				// This is all kinds of coupled with engine because of
+				// "kwil_schemas" (and the column name "dbid") and the dbid prefix
+				// "ds_". If we want to use this as a control table to handle DDL,
+				// we probably want to do this properly.
+				if vals, err := tuplColVals(logicalMsg.OldTuple.Columns, rel); err != nil {
+					logger.Warnf("cannot decode delete tuple columns for %v: %v", relName, err)
+				} else {
+					rmSchema, ok := vals["dbid"].(string)
+					if !ok {
+						logger.Warnf("no db id in schema row delete: %v", vals)
+					} else {
+						logger.Infof("observed delete of schema %v from kwild_internal.kwil_schemas", rmSchema)
+						for tblRef := range changesetWriter.stats {
+							if tblRef.Namespace == "ds_"+rmSchema {
+								logger.Infof("removing stats for table %v", tblRef)
+								delete(changesetWriter.stats, tblRef)
+							}
+						}
+					}
+				}
+			} else {
+				logger.Debugf("ignoring delete in relation %v", relName)
+			}
 			break
 		}
 
@@ -448,12 +472,24 @@ func decodeWALData(hasher hash.Hash, walData []byte, relations map[uint32]*pglog
 			if okSchema(rel.Namespace) {
 				rels[relID] = rel
 				// relName := rel.Namespace + "." + rel.RelationName
+				tblRef := sql.TableRef{Namespace: rel.Namespace, Table: rel.RelationName}
+				_, have := changesetWriter.stats[tblRef]
+				if !have {
+					// this can happen if there are back-to-back truncates on
+					// the same table, which a CASCADE can cause.
+					logger.Warnf("TRUNCATE: No table statistics available for %v", tblRef)
+				} else {
+					logger.Infof("TRUNCATE: must delete statistics for truncated table %v", tblRef)
+					// delete(changesetWriter.stats, tblRef)
+				}
 			}
 		}
 		if len(rels) == 0 {
 			logger.Debug("no relevant relations in truncate message")
 			break
 		}
+
+		logger.Infof("truncate message: relations %v, option %v", logicalMsg.TruncateMessage.RelationIDs, logicalMsg.TruncateMessage.Option)
 
 		hasher.Write(encodeTruncateMsg(rels, &logicalMsg.TruncateMessage))
 		stats.truncs++

@@ -48,7 +48,7 @@ func Test_StoringSchemas(t *testing.T) {
 	require.NoError(t, err)
 
 	defer func() {
-		err := deleteSchema(ctx, tx, testdata.TestSchema.DBID())
+		err := deleteSchema(ctx, tx, testdata.TestSchema)
 		require.NoError(t, err)
 	}()
 

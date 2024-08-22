@@ -304,7 +304,8 @@ func getSchemas(ctx context.Context, tx sql.Executor, convertFunc func([]byte) (
 
 // deleteSchema deletes a schema from the database.
 // It will also delete the schema from the kwil_schemas table.
-func deleteSchema(ctx context.Context, tx sql.TxMaker, dbid string) error {
+func deleteSchema(ctx context.Context, tx sql.TxMaker, kwilSchema *types.Schema) error {
+	dbid := kwilSchema.DBID()
 	schemaName := dbidSchema(dbid)
 
 	sp, err := tx.BeginTx(ctx)
@@ -313,11 +314,30 @@ func deleteSchema(ctx context.Context, tx sql.TxMaker, dbid string) error {
 	}
 	defer sp.Rollback(ctx)
 
+	for _, tbl := range kwilSchema.Tables {
+		// TRUNCATE the table to ensure a DML message corresponding to the
+		// dropping of all tables in this schema is sent to the logical
+		// replication subscriber. Otherwise the subscriber does not know that
+		// the table was cleared -- we'd have to communicate that directly.
+
+		// "TRUNCATE is not MVCC-safe. After truncation, the table will appear
+		// empty to concurrent transactions, if they are using a snapshot taken
+		// before the truncation occurred."
+		_, err = sp.Execute(ctx, `TRUNCATE `+schemaName+`.`+tbl.Name+` CASCADE`)
+		if err != nil {
+			return err
+		}
+	}
+
 	_, err = sp.Execute(ctx, fmt.Sprintf(sqlDropSchema, schemaName))
 	if err != nil {
 		return err
 	}
 
+	// This is DML, so logical replication subscriber could look for this as the
+	// signal to clear stats. It just needs to recognize the kwil_internal pg
+	// schema and the kwil_schemas table in it, and get the dbid=>Namespace and
+	// rm corresponding stats.
 	_, err = sp.Execute(ctx, sqlDeleteKwilSchema, dbid)
 	if err != nil {
 		return err
