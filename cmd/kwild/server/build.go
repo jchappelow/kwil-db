@@ -668,13 +668,24 @@ func buildEngine(d *coreDependencies, db *pg.DB) *execution.GlobalContext {
 		failBuild(err, "failed to initialize engine")
 	}
 
+	statsDir := filepath.Join(d.cfg.RootDir, "stats")
+	if err = os.MkdirAll(statsDir, 0755); err != nil {
+		failBuild(err, "make directory for table stats")
+	}
+
 	eng, err := execution.NewGlobalContext(d.ctx, tx, extensions, &common.Service{
 		Logger:           d.log.Named("engine").Sugar(),
 		ExtensionConfigs: d.cfg.AppCfg.Extensions,
-	})
+	}, newDirFS(statsDir))
 	if err != nil {
 		failBuild(err, "failed to build engine")
 	}
+
+	stats := eng.DBStats()
+	for tbl, stat := range stats {
+		d.log.Infof("table %q stats: %v", tbl, stat.String())
+	}
+	db.SetBaseStats(stats)
 
 	err = tx.Commit(d.ctx)
 	if err != nil {
@@ -682,6 +693,28 @@ func buildEngine(d *coreDependencies, db *pg.DB) *execution.GlobalContext {
 	}
 
 	return eng
+}
+
+func newDirFS(dir string) dirFS {
+	return dirFS{
+		// FS:   os.DirFS(dir),
+		path: dir,
+	}
+}
+
+type dirFS struct {
+	// fs.FS // os.DirFS
+	path string
+}
+
+func (df dirFS) WriteFile(name string, data []byte) error {
+	fp := filepath.Join(df.path, name)
+	return os.WriteFile(fp, data, 0755)
+}
+
+func (df dirFS) ReadFile(name string) ([]byte, error) {
+	fp := filepath.Join(df.path, name)
+	return os.ReadFile(fp)
 }
 
 func initChainMetadata(d *coreDependencies, tx sql.Tx) {

@@ -112,7 +112,8 @@ func (l *legacyAdapter) Execute(scope *actions.ProcedureContext, metadata map[st
 		return nil, errors.New("not initialized")
 	}
 
-	return l.ext.Call(scope, nil, method, args)
+	vals, _, err := l.ext.Call(scope, nil, method, args)
+	return vals, err
 }
 
 func (l *legacyAdapter) Initialize(ctx context.Context, metadata map[string]string) (map[string]string, error) {

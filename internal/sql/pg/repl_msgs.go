@@ -55,7 +55,7 @@ func parseV3(data []byte, inStream bool) (m pglogrepl.Message, err error) {
 		if err = v2.DecodeV2(data[1:], inStream); err != nil {
 			return nil, err
 		}
-	} else if err = decoder.Decode(data[1:]); err != nil {
+	} else if err = decoder.Decode(data[1:]); err != nil { // v1 and v3
 		return nil, err
 	}
 

@@ -6,6 +6,8 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/kwilteam/kwil-db/common/sql"
 	common "github.com/kwilteam/kwil-db/common/sql"
 	syncmap "github.com/kwilteam/kwil-db/internal/utils/sync_map"
 )
@@ -92,6 +94,11 @@ var _ conner = (*nestedTx)(nil)
 // If the writer is nil, the changeset will not be written.
 func (tx *dbTx) Precommit(ctx context.Context, changes chan<- any) ([]byte, error) {
 	return tx.db.precommit(ctx, changes)
+}
+
+// this is messed up
+func (tx *dbTx) SetBaseStats(stats map[sql.TableRef]*sql.Statistics) {
+	tx.db.SetBaseStats(stats)
 }
 
 // Subscribe subscribes to notifications passed using the special `notice()`

@@ -58,6 +58,32 @@ func mkStatsTestTableTx(t *testing.T, db *DB) sql.PreparedTx {
 	return tx
 }
 
+func TestStatsUpdates(t *testing.T) {
+	ctx := context.Background()
+	db := mkTestTableDB(t)
+	txOuter := mkStatsTestTableTx(t, db)
+
+	txOuter.Execute(ctx, "--ping")
+
+	tx, err := txOuter.BeginTx(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		tx.Rollback(ctx)
+	})
+
+	// insert some stuff
+	tbl := `colcheck`
+	_, err = tx.Execute(ctx, `INSERT INTO `+tbl+` VALUES(0, 123, 'asdf')`)
+	require.NoError(t, err)
+
+	err = tx.Commit(ctx)
+	require.NoError(t, err)
+
+	// commit tx
+
+	// need to use precommit and get the stats to see what happened!
+}
+
 func TestTableStats(t *testing.T) {
 	ctx := context.Background()
 	db := mkTestTableDB(t)

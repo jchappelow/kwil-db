@@ -322,7 +322,10 @@ func decodeWALData(hasher hash.Hash, walData []byte, relations map[uint32]*pglog
 			// logger.Debugf("ignoring update to relation %v", relName)
 			break
 		}
-		changesetWriter.WriteNewRelation(logicalMsg)
+
+		if err := changesetWriter.writeNewRelation(logicalMsg); err != nil {
+			return false, 0, fmt.Errorf("writeNewRelation: %w", err)
+		}
 
 	case *pglogrepl.BeginMessage:
 		logger.Debugf(" [msg] Begin: LSN %v (%d)", logicalMsg.FinalLSN, uint64(logicalMsg.FinalLSN))

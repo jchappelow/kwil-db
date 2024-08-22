@@ -400,7 +400,7 @@ func (m *mockTxApp) ApplyMempool(ctx *common.TxContext, db sql.DB, tx *transacti
 	return nil
 }
 
-func (m *mockTxApp) Begin(ctx context.Context, height int64) error {
+func (m *mockTxApp) Begin(ctx context.Context, height int64, db sql.DB) error {
 	return nil
 }
 

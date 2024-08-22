@@ -179,6 +179,8 @@ func (p *preparedAction) call(scope *precompiles.ProcedureContext, global *Globa
 	}
 
 	for _, inst := range p.instructions {
+		// inst.cost()
+
 		if err := inst.execute(scope, global, db); err != nil {
 			return err
 		}
@@ -252,7 +254,7 @@ func (e *callMethod) execute(scope *precompiles.ProcedureContext, global *Global
 	var err error
 
 	scope.UsedGas += 10
-	if scope.UsedGas >= 10000000 {
+	if scope.UsedGas >= scope.GasLimit {
 		return fmt.Errorf("out of gas")
 	}
 
@@ -275,7 +277,7 @@ func (e *callMethod) execute(scope *precompiles.ProcedureContext, global *Global
 		}
 
 		// new scope since we are calling a namespace
-		results, err = namespace.Call(newScope, &common.App{
+		results, _, err = namespace.Call(newScope, &common.App{
 			Service: global.service,
 			DB:      db,
 			Engine:  global,
@@ -331,14 +333,28 @@ func decorateExecuteErr(err error, stmt string) error {
 
 var _ instructionFunc = (&dmlStmt{}).execute
 
+// func (e *dmlStmt) cost(scope *precompiles.ProcedureContext, _ *GlobalContext,
+// 	db sql.DB) (int64, error) {
+// 	return 0, nil
+// }
+
 func (e *dmlStmt) execute(scope *precompiles.ProcedureContext, _ *GlobalContext, db sql.DB) error {
 	// Expend the arguments based on the ordered parameters for the DML statement.
 	params := orderAndCleanValueMap(scope.Values(), e.OrderedParameters)
+
+	// query plan and cost that use selectivity to reduce cost require
+	// substituting variables for literals for values. we can get a cost with a
+	// variable, but a filter that uses that variable can't be combined with
+	// statistics to infer selectivity. a literal value is needed to do that.
+
 	// args := append([]any{pg.QueryModeExec}, params...)
 	results, err := db.Execute(scope.Ctx, e.SQLStatement, append([]any{pg.QueryModeExec}, params...)...)
 	if err != nil {
 		return decorateExecuteErr(err, e.SQLStatement)
 	}
+
+	// here can we check an audit table for the added/removed/updated values
+	// needed to update statistics? if not mutable SQL, do not bother
 
 	// we need to check for any pg numeric types returned, and convert them to int64
 	for i, row := range results.Rows {

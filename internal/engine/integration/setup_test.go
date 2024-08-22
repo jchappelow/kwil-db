@@ -84,7 +84,7 @@ func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB, err error)
 	}, &common.Service{
 		Logger:           log.NewNoOp().Sugar(),
 		ExtensionConfigs: map[string]map[string]string{},
-	})
+	}, mockFS{})
 	require.NoError(t, err)
 
 	err = tx.Commit(ctx)
@@ -92,6 +92,13 @@ func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB, err error)
 
 	return global, db, nil
 }
+
+type mockFS struct{}
+
+func (mf mockFS) ReadFile(name string) ([]byte, error) {
+	return nil, nil
+}
+func (mf mockFS) WriteFile(name string, data []byte) error { return nil }
 
 // mocks a namespace initializer
 type mathInitializer struct {
@@ -113,26 +120,26 @@ type mathExt struct{}
 
 var _ actions.Instance = &mathExt{}
 
-func (m *mathExt) Call(caller *actions.ProcedureContext, _ *common.App, method string, inputs []any) ([]any, error) {
+func (m *mathExt) Call(caller *actions.ProcedureContext, _ *common.App, method string, inputs []any) ([]any, bool, error) {
 	if method != "add" {
-		return nil, fmt.Errorf("unknown method: %s", method)
+		return nil, false, fmt.Errorf("unknown method: %s", method)
 	}
 
 	if len(inputs) != 2 {
-		return nil, fmt.Errorf("expected 2 inputs, got %d", len(inputs))
+		return nil, false, fmt.Errorf("expected 2 inputs, got %d", len(inputs))
 	}
 
 	// The extension needs to tolerate any compatible input type.
 
 	a, err := conv.Int(inputs[0])
 	if err != nil {
-		return nil, fmt.Errorf("expected int64, got %T (%w)", inputs[0], err)
+		return nil, false, fmt.Errorf("expected int64, got %T (%w)", inputs[0], err)
 	}
 
 	b, err := conv.Int(inputs[1])
 	if err != nil {
-		return nil, fmt.Errorf("expected int64, got %T (%w)", inputs[1], err)
+		return nil, false, fmt.Errorf("expected int64, got %T (%w)", inputs[1], err)
 	}
 
-	return []any{a + b}, nil
+	return []any{a + b}, false, nil
 }

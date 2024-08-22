@@ -194,7 +194,7 @@ func DeleteCookie(authFile string, domain string, userIdentifier []byte) error {
 		return fmt.Errorf("marshal kgw authn info: %w", err)
 	}
 
-	err = utils.WriteFile(authFile, jsonBytes)
+	err = os.WriteFile(authFile, jsonBytes, 0644)
 	if err != nil {
 		return fmt.Errorf("write kgw authn file: %w", err)
 	}

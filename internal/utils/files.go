@@ -3,18 +3,31 @@ package utils
 import (
 	"crypto/sha256"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 )
 
-// CreateDirIfNeeded should diaf
-func CreateDirIfNeeded(path string) error {
-	return os.MkdirAll(path, 0755)
+func NewDirFS(dir string) DirFS {
+	return DirFS{
+		FS:   os.DirFS(dir),
+		path: dir,
+	}
+}
+
+type DirFS struct {
+	fs.FS // os.DirFS
+	path  string
+}
+
+func (df DirFS) WriteFile(name string, data []byte) error {
+	fp := filepath.Join(df.path, name)
+	return os.WriteFile(fp, data, 0755)
 }
 
 func ReadOrCreateFile(path string) ([]byte, error) {
 	dir := filepath.Dir(path)
-	if err := CreateDirIfNeeded(dir); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
@@ -34,7 +47,7 @@ func ReadOrCreateFile(path string) ([]byte, error) {
 
 func CreateOrOpenFile(path string) (*os.File, error) {
 	dir := filepath.Dir(path)
-	if err := CreateDirIfNeeded(dir); err != nil {
+	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
 
@@ -44,13 +57,6 @@ func CreateOrOpenFile(path string) (*os.File, error) {
 	}
 
 	return file, nil
-}
-
-// NOTE: os.ReadFile requires no wrapper.
-
-// WriteFile should diaf
-func WriteFile(path string, data []byte) error {
-	return os.WriteFile(path, data, 0644)
 }
 
 func HashFile(path string) ([]byte, error) {

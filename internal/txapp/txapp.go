@@ -37,6 +37,8 @@ type TxApp struct {
 	// The various internal stores (accounts, votes, etc.) are accessed through
 	// the Database via the functions defined in relevant packages.
 
+	height int64
+
 	forks forks.Forks
 
 	events Rebroadcaster
@@ -279,7 +281,19 @@ func (r *TxApp) logValidatorJoinApprovals(tx *transactions.Transaction) {
 // transaction that may be committed, or rolled back on error or crash.
 // It is given the starting networkParams, and is expected to use them to
 // use them to store any changes to the network parameters in the database during Finalize.
-func (r *TxApp) Begin(ctx context.Context, height int64) error {
+func (r *TxApp) Begin(ctx context.Context, height int64, db sql.DB) error {
+	r.height = height
+
+	// Rebuild and persist statistics, for a subset of datasets that are
+	// "scheduled" for a refresh. We do this *before* executing transactions so
+	// that the changesets that are captured ... but why does it go wrong if we
+	// do this after executing transactions as long as it is before Precommit?
+	err := r.Engine.RebuildStatistics(ctx, height, db)
+	if err != nil {
+		return err
+	}
+	// NOTE: we could do this before FinalizeBlock, async with consensus method calls
+
 	// Before executing transaction in this block, add/remove/update functionality.
 	forks := r.activations(height)
 	if len(forks) > 0 {
@@ -330,10 +344,9 @@ func (r *TxApp) activations(height int64) []*consensus.Hardfork {
 }
 
 // Finalize signals that a block has been finalized. No more changes can be
-// applied to the database. It returns the apphash and the validator set. And
-// state modifications specified by hardforks activating at this height are
-// applied. It is given the old and new network parameters, and is expected to
-// use them to store any changes to the network parameters in the database.
+// applied to the database. It processes votes, runs end-block hooks, applies
+// fork-defined state modifications, and returns the new validator set. This
+// should be called just prior to calling the DB's Precommit method.
 func (r *TxApp) Finalize(ctx context.Context, db sql.DB, block *common.BlockContext) (finalValidators []*types.Validator, approvedJoins, expiredJoins [][]byte, err error) {
 	expiredJoins, err = r.processVotes(ctx, db, block)
 	if err != nil {
@@ -385,6 +398,16 @@ func (r *TxApp) Finalize(ctx context.Context, db sql.DB, block *common.BlockCont
 	r.valMtx.Lock()
 	r.validators = finalValidators
 	r.valMtx.Unlock()
+
+	// // rebuild and persist statistics, for a subset of datasets that are "scheduled" for a refresh
+	// err = r.Engine.RebuildStatistics(ctx, block.Height, db)
+	// if err != nil {
+	// 	return nil, nil, nil, err
+	// }
+
+	// For some reason having this here (after tx execs) can occasionally result
+	// in incorrect MCV values, which leads to changeset based updates failing
+	// and trying to use the histogram in correctly (handled by panic!)
 
 	return finalValidators, r.approvedJoins, expiredJoins, nil
 }

@@ -48,29 +48,29 @@ type adhocExtension struct{}
 
 // Has one method: Call. It takes a string as an argument, which is
 // the ad-hoc SQL statement to execute.
-func (adhocExtension) Call(scope *ProcedureContext, app *common.App, method string, inputs []any) ([]any, error) {
+func (adhocExtension) Call(scope *ProcedureContext, app *common.App, method string, inputs []any) ([]any, bool, error) {
 	if len(inputs) != 1 {
-		return nil, fmt.Errorf("adhoc: expected 1 string argument, got %d", len(inputs))
+		return nil, false, fmt.Errorf("adhoc: expected 1 string argument, got %d", len(inputs))
 	}
 	stmt, ok := inputs[0].(string)
 	if !ok {
-		return nil, fmt.Errorf("adhoc: expected string argument, got %T", inputs[0])
+		return nil, false, fmt.Errorf("adhoc: expected string argument, got %T", inputs[0])
 	}
 
 	// we will pass the scope.Values() as the arguments. This makes
 	// it possible to use @caller, etc in the ad-hoc statement.
 	if strings.ToLower(method) != "execute" {
-		return nil, fmt.Errorf(`adhoc: unknown method "%s"`, method)
+		return nil, false, fmt.Errorf(`adhoc: unknown method "%s"`, method)
 	}
 
 	res, err := app.Engine.Execute(scope.Ctx, app.DB, scope.DBID, stmt, scope.Values())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// We set the result, so that if an ad-hoc read is executed in a
 	// view action, the result will be returned to the engine.
 	scope.Result = res
 
-	return nil, nil
+	return nil, false, nil
 }

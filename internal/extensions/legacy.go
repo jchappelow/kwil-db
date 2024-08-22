@@ -48,6 +48,7 @@ type legacyExtensionAdapter struct {
 
 var _ precompiles.Instance = (*legacyExtensionAdapter)(nil)
 
-func (l *legacyExtensionAdapter) Call(scope *precompiles.ProcedureContext, app *common.App, method string, args []any) ([]any, error) {
-	return l.ext.Execute(scope, l.metadata, method, args...)
+func (l *legacyExtensionAdapter) Call(scope *precompiles.ProcedureContext, app *common.App, method string, args []any) ([]any, bool, error) {
+	vals, err := l.ext.Execute(scope, l.metadata, method, args...)
+	return vals, false, err
 }

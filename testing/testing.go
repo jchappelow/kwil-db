@@ -182,7 +182,7 @@ func (tc SchemaTest) Run(ctx context.Context, opts *Options) error {
 					Logger:           logger,
 					ExtensionConfigs: map[string]map[string]string{},
 					Identity:         []byte("node"),
-				})
+				}, mockFS{})
 				if err != nil {
 					return err
 				}
@@ -242,6 +242,13 @@ func (tc SchemaTest) Run(ctx context.Context, opts *Options) error {
 		return errors.Join(errs...)
 	})
 }
+
+type mockFS struct{}
+
+func (mf mockFS) ReadFile(name string) ([]byte, error) {
+	return nil, nil
+}
+func (mf mockFS) WriteFile(name string, data []byte) error { return nil }
 
 var deployer = []byte("deployer")
 

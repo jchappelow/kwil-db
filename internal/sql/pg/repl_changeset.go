@@ -23,6 +23,8 @@ type changesetIoWriter struct {
 	metadata  *changesetMetadata   // reset at end of each commit, builds new list of relations for each db tx
 	oidToType map[uint32]*datatype // immutable map of OIDs to Kwil data types
 	csChan    chan<- any           // *Relation / *ChangesetEntry
+
+	stats map[sql.TableRef]*sql.Statistics
 }
 
 // ChangeStreamer is a type that supports streaming with StreamElement.
@@ -299,8 +301,10 @@ func (ce *ChangesetEntry) applyDeletes(ctx context.Context, tx sql.DB, rel *Rela
 	return err
 }
 
-// registerMetadata registers a relation with the changeset metadata.
-// it returns the index of the relation in the metadata.
+// registerMetadata registers a relation with the changeset metadata. it returns
+// the index of the relation in the metadata. If the relation has not yet been
+// encountered for this transaction, a Relation will be constructed, appended to
+// the metadata's Relations slice, and send on the changeset channel.
 func (c *changesetIoWriter) registerMetadata(relation *pglogrepl.RelationMessageV2) uint32 {
 	idx, ok := c.metadata.relationIdx[[2]string{relation.Namespace, relation.RelationName}]
 	if ok {
@@ -331,16 +335,20 @@ func (c *changesetIoWriter) registerMetadata(relation *pglogrepl.RelationMessage
 	// Send the relation to the csChan every time a new relation is registered
 	// So that the changeset receivers like migrator can rebuild
 	// the relations table on the new network
-	c.csChan <- rel
+	if c.csChan != nil {
+		c.csChan <- rel
+	}
+
 	return uint32(len(c.metadata.Relations) - 1)
 }
 
-func (c *changesetIoWriter) WriteNewRelation(relation *pglogrepl.RelationMessageV2) error {
+func (c *changesetIoWriter) writeNewRelation(relation *pglogrepl.RelationMessageV2) error {
 	if c == nil || c.csChan == nil {
 		return nil
 	}
 
 	c.registerMetadata(relation)
+
 	return nil
 }
 
@@ -361,7 +369,31 @@ func (c *changesetIoWriter) decodeInsert(insert *pglogrepl.InsertMessageV2, rela
 		NewTuple:    tup.Columns,
 		// OldTuple is empty for insert
 	}
-	c.csChan <- ce
+
+	rel := c.metadata.Relations[idx]
+	kwilTuple, err := decodeTuple(ce.NewTuple, rel)
+	if err != nil {
+		return err
+	}
+	tblRef := sql.TableRef{Namespace: rel.Schema, Table: rel.Table}
+	stats, have := c.stats[tblRef]
+	if !have {
+		// who owns the statistics is up in the air, so this part is in flux
+		logger.Warnf("INSERT: no table statistics for %v", tblRef)
+		stats = &sql.Statistics{
+			ColumnStatistics: make([]sql.ColumnStatistics, len(kwilTuple)),
+		}
+		c.stats[tblRef] = stats
+	}
+	for ic := range kwilTuple {
+		upColStatsWithInsert(&stats.ColumnStatistics[ic], kwilTuple[ic])
+	}
+	stats.RowCount++
+	logger.Infof("INSERT (%v): new rows %d", tblRef, stats.RowCount)
+
+	if c.csChan != nil {
+		c.csChan <- ce
+	}
 
 	return nil
 }
@@ -398,7 +430,36 @@ func (c *changesetIoWriter) decodeUpdate(update *pglogrepl.UpdateMessageV2, rela
 		}
 	}
 	ce.NewTuple = tup.Columns
-	c.csChan <- ce
+
+	rel := c.metadata.Relations[idx]
+	tblRef := sql.TableRef{Namespace: rel.Schema, Table: rel.Table}
+	stats, have := c.stats[tblRef]
+	if !have {
+		// stats = &sql.Statistics{}
+		// c.stats[tblRef] = stats
+		logger.Errorf("UPDATE: No table statistics available for %v", tblRef)
+	} else {
+		kwilTupleOld, err := decodeTuple(ce.OldTuple, rel)
+		if err != nil {
+			return err
+		}
+		kwilTupleNew, err := decodeTuple(ce.NewTuple, rel)
+		if err != nil {
+			return err
+		}
+		logger.Infof("START UPDATE %v", tblRef)
+		for ic := range kwilTupleNew {
+			logger.Infof("UPDATE tuple for %v / col %d (%s): %v (%T) => %v (%T)", tblRef, ic, rel.Columns[ic].Name,
+				kwilTupleOld[ic], kwilTupleOld[ic], kwilTupleNew[ic], kwilTupleNew[ic])
+			upColStatsWithUpdate(&stats.ColumnStatistics[ic], kwilTupleOld[ic], kwilTupleNew[ic])
+		}
+		// No change to stats.RowCount
+		logger.Infof("END UPDATE (%v): new rows %d", tblRef, stats.RowCount)
+	}
+
+	if c.csChan != nil {
+		c.csChan <- ce
+	}
 
 	return nil
 }
@@ -415,6 +476,7 @@ func (c *changesetIoWriter) decodeDelete(delete *pglogrepl.DeleteMessageV2, rela
 	if err != nil {
 		return err
 	}
+	// tup.RelationIdx = idx // ?
 
 	ce := &ChangesetEntry{
 		RelationIdx: idx,
@@ -422,7 +484,26 @@ func (c *changesetIoWriter) decodeDelete(delete *pglogrepl.DeleteMessageV2, rela
 		// NewTuple is empty for delete
 	}
 
-	c.csChan <- ce
+	rel := c.metadata.Relations[idx]
+	tblRef := sql.TableRef{Namespace: rel.Schema, Table: rel.Table}
+	stats, have := c.stats[tblRef]
+	if !have {
+		logger.Errorf("DELETE: No table statistics available for %v", tblRef)
+	} else {
+		kwilTuple, err := decodeTuple(ce.OldTuple, rel)
+		if err != nil {
+			return err
+		}
+		for ic := range kwilTuple {
+			upColStatsWithDelete(&stats.ColumnStatistics[ic], kwilTuple[ic])
+		}
+		stats.RowCount--
+		logger.Infof("DELETE (%v): new rows %d", tblRef, stats.RowCount) // make Debugf
+	}
+
+	if c.csChan != nil {
+		c.csChan <- ce
+	}
 
 	return nil
 }
@@ -442,8 +523,10 @@ func (c *changesetIoWriter) commit() error {
 	}
 
 	// close the changes chan to signal the end of the changeset
-	close(c.csChan)
-	c.csChan = nil
+	if c.csChan != nil {
+		close(c.csChan)
+		c.csChan = nil
+	}
 
 	return nil
 }
@@ -460,11 +543,14 @@ func (c *changesetIoWriter) fail() {
 		relationIdx: map[[2]string]int{},
 	}
 
-	close(c.csChan)
-	c.csChan = nil
+	if c.csChan != nil {
+		close(c.csChan)
+		c.csChan = nil
+	}
 }
 
-// convertPgxTuple converts a pgx TupleData to a Tuple.
+// convertPgxTuple converts a pgx TupleData to a Tuple. The decodeTuple function
+// creates Kwil types from the Tuple.
 func convertPgxTuple(pgxTuple *pglogrepl.TupleData, relation *pglogrepl.RelationMessageV2, oidToType map[uint32]*datatype) (*Tuple, error) {
 	tuple := &Tuple{
 		Columns: make([]*TupleColumn, len(pgxTuple.Columns)),

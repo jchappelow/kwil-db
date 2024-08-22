@@ -12,6 +12,7 @@ import (
 	"github.com/kwilteam/kwil-db/core/types"
 	"github.com/kwilteam/kwil-db/core/types/testdata"
 	"github.com/kwilteam/kwil-db/extensions/precompiles"
+	"github.com/kwilteam/kwil-db/internal/sql/pg"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -362,12 +363,20 @@ func Test_Execution(t *testing.T) {
 					Logger:           log.NewNoOp().Sugar(),
 					ExtensionConfigs: map[string]map[string]string{},
 				},
+				mockFS{},
 			)
 			require.NoError(t, err)
 			tc.fn(t, engine)
 		})
 	}
 }
+
+type mockFS struct{}
+
+func (mf mockFS) ReadFile(name string) ([]byte, error) {
+	return nil, nil
+}
+func (mf mockFS) WriteFile(name string, data []byte) error { return nil }
 
 func newDB(readonly bool) *mockDB {
 	am := sql.ReadWrite
@@ -379,6 +388,7 @@ func newDB(readonly bool) *mockDB {
 		accessMode:    am,
 		dbs:           make(map[string][]byte),
 		executedStmts: make([]string, 0),
+		tblStatsRes:   nil,
 	}
 }
 
@@ -395,6 +405,8 @@ type mockDB struct {
 	dbs           map[string][]byte // serialized schemas
 	executedStmts []string
 	resultSet     *sql.ResultSet
+
+	tblStatsRes *sql.Statistics
 }
 
 var _ sql.AccessModer = (*mockDB)(nil)
@@ -428,6 +440,18 @@ func (m *mockDB) Execute(ctx context.Context, stmt string, args ...any) (*sql.Re
 	case sqlDeleteKwilSchema:
 		delete(m.dbs, args[0].(string))
 	default:
+		// pg.TableStats queries: commented since we're satisfying various
+		// interfaces like RowCounter, ColumnInfoer, and ColStatser instead
+		// since that's easier and less brittle than trying to match and parse
+		// the statements used by pg.TableStats.
+
+		// if strings.HasPrefix(stmt, `SELECT count(1) FROM ds_`) {
+		// 	return &sql.ResultSet{
+		// 		Columns: []string{},
+		// 		Rows:    [][]any{{1}},
+		// 	}, nil
+		// }
+
 		m.executedStmts = append(m.executedStmts, stmt)
 
 		if m.resultSet != nil {
@@ -439,6 +463,16 @@ func (m *mockDB) Execute(ctx context.Context, stmt string, args ...any) (*sql.Re
 		Columns: []string{},
 		Rows:    [][]any{},
 	}, nil
+}
+
+var _ pg.TableStatser = (*mockDB)(nil)
+
+func (m *mockDB) TableStats(ctx context.Context, schema, tbl string) (*sql.Statistics, error) {
+	return m.tblStatsRes, nil
+	//  *sql.Statistics{
+	// 	RowCount:         1,
+	// 	ColumnStatistics: []sql.ColumnStatistics{},
+	// }, nil
 }
 
 type mockTx struct {
@@ -534,8 +568,8 @@ type mathExt struct{}
 
 var _ precompiles.Instance = &mathExt{}
 
-func (m *mathExt) Call(caller *precompiles.ProcedureContext, app *common.App, method string, inputs []any) ([]any, error) {
-	return nil, nil
+func (m *mathExt) Call(caller *precompiles.ProcedureContext, app *common.App, method string, inputs []any) ([]any, bool, error) {
+	return nil, false, nil
 }
 
 // Test_OrderSchemas tests that schemas are ordered correctly when importing with dependencies
@@ -581,6 +615,7 @@ func Test_OrderSchemas(t *testing.T) {
 			Logger:           log.NewNoOp().Sugar(),
 			ExtensionConfigs: map[string]map[string]string{},
 		},
+		mockFS{},
 	)
 	require.NoError(t, err)
 

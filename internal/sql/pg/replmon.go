@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
+	"github.com/kwilteam/kwil-db/common/sql"
 	"github.com/kwilteam/kwil-db/core/utils/random"
 )
 
@@ -68,13 +69,14 @@ func newReplMon(ctx context.Context, host, port, user, pass, dbName string, sche
 	}
 
 	// we set the changeset io.Writer to nil, as the changesetIoWriter will skip all writes
-	// until enabled by setting the atomic.Bool to true.
+	// until the writer is set just prior to (pre)committing the transaction. See (*replMon).recvID
 	cs := &changesetIoWriter{
 		metadata: &changesetMetadata{
 			relationIdx: map[[2]string]int{},
 		},
 		oidToType: oidToTypes,
 		// writer is nil, set in caller prior to preparing txns, ignored if left nil
+		stats: map[sql.TableRef]*sql.Statistics{},
 	}
 
 	var slotName = publicationName + random.String(8) // arbitrary, so just avoid collisions

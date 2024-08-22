@@ -31,7 +31,9 @@ type Instance interface {
 	// to the instance implementation to determine if a method is
 	// valid, and to subsequently decode the arguments. The arguments
 	// passed in as args, as well as returned, are scalar values.
-	Call(scoper *ProcedureContext, app *common.App, method string, inputs []any) ([]any, error)
+	// It also returns if the call was mutative (but not necessarily
+	// if any tables were modified.).
+	Call(scoper *ProcedureContext, app *common.App, method string, inputs []any) ([]any, bool, error)
 }
 
 // DeploymentContext is the context for a dataset deployment
@@ -75,7 +77,9 @@ type ProcedureContext struct {
 	// incremented each time a procedure calls another procedure.
 	StackDepth int
 	// UsedGas is the amount of gas used in the current execution.
-	UsedGas uint64
+	UsedGas uint64 // TODO: *big.Int
+
+	GasLimit uint64 // TODO: *big.Int
 }
 
 // SetValue sets a value in the scope.
@@ -125,6 +129,7 @@ func (p *ProcedureContext) NewScope() *ProcedureContext {
 		Procedure:  p.Procedure,
 		StackDepth: p.StackDepth,
 		UsedGas:    p.UsedGas,
+		GasLimit:   p.GasLimit,
 		Height:     p.Height,
 	}
 }

@@ -455,7 +455,7 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		}
 	}
 
-	err := a.txApp.Begin(ctx, req.Height)
+	err := a.txApp.Begin(ctx, req.Height, a.consensusTx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx commit failed: %w", err)
 	}
@@ -651,11 +651,6 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 	}
 
 	a.log.Debug("Finalize(start)", log.Int("height", a.height), log.String("appHash", hex.EncodeToString(a.appHash)))
-	// Get the new validator set and apphash from txApp.
-	finalValidators, approvedJoins, expiredJoins, err := a.txApp.Finalize(ctx, a.consensusTx, &blockCtx)
-	if err != nil {
-		return nil, fmt.Errorf("failed to finalize transaction app: %w", err)
-	}
 
 	// store any changes to the network params
 	err = meta.StoreDiff(ctx, a.consensusTx, &oldNetworkParams, networkParams)
@@ -672,6 +667,12 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 	err = meta.SetChainState(ctx, a.consensusTx, req.Height, []byte{0x42})
 	if err != nil {
 		return nil, err
+	}
+
+	// Get the new validator set and join request changes from txApp.
+	finalValidators, approvedJoins, expiredJoins, err := a.txApp.Finalize(ctx, a.consensusTx, &blockCtx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to finalize transaction app: %w", err)
 	}
 
 	// Create a new changeset processor

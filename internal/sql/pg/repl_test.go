@@ -56,7 +56,7 @@ func Test_repl(t *testing.T) {
 
 	const publicationName = "kwild_repl"
 	var slotName = publicationName + random.String(8)
-	commitChan, errChan, quit, err := startRepl(ctx, conn, publicationName, slotName, schemaFilter, &changesetIoWriter{})
+	commitChan, errChan, quit, err := startRepl(ctx, conn, publicationName, slotName, schemaFilter, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

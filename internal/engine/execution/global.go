@@ -6,12 +6,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 
 	"github.com/kwilteam/kwil-db/common"
 	"github.com/kwilteam/kwil-db/common/sql"
 	"github.com/kwilteam/kwil-db/core/types"
+	"github.com/kwilteam/kwil-db/core/utils/order"
 	"github.com/kwilteam/kwil-db/extensions/precompiles"
 	"github.com/kwilteam/kwil-db/internal/engine/generate"
 	"github.com/kwilteam/kwil-db/internal/sql/pg"
@@ -37,6 +39,51 @@ type GlobalContext struct {
 	datasets map[string]*baseDataset
 
 	service *common.Service
+
+	catalog catalog // dt.Catalog
+
+	fs FS
+}
+
+type FS interface {
+	// fs.FS
+	ReadFile(name string) ([]byte, error)
+	WriteFile(name string, data []byte) error
+}
+
+type tableMeta struct {
+	schema *sql.Schema
+	stats  *sql.Statistics
+}
+
+func (tm tableMeta) Statistics() *sql.Statistics {
+	return tm.stats
+}
+func (tm tableMeta) Schema() *sql.Schema {
+	return tm.schema
+}
+
+var _ sql.DataSource = tableMeta{}
+var _ sql.DataSource = (*tableMeta)(nil)
+
+type catalog struct {
+	fields map[sql.TableRef]*sql.Schema
+	stats  map[sql.TableRef]*sql.Statistics
+	// meta map[sql.TableRef]*tableMeta
+}
+
+// var _ query_planner.Catalog = (*catalog)(nil)
+
+func (m *catalog) GetDataSource(tableRef *sql.TableRef) (sql.DataSource, error) {
+	schema, ok := m.fields[*tableRef]
+	if !ok {
+		return nil, errors.New("table schema not found in catalog")
+	}
+	stats, ok := m.stats[*tableRef]
+	if !ok {
+		return nil, errors.New("table stats not found in catalog")
+	}
+	return &tableMeta{schema, stats}, nil
 }
 
 var (
@@ -139,11 +186,16 @@ func InitializeEngine(ctx context.Context, tx sql.DB) error {
 // datasets from the datastore. The provided database is only used for
 // construction.
 func NewGlobalContext(ctx context.Context, db sql.Executor, extensionInitializers map[string]precompiles.Initializer,
-	service *common.Service) (*GlobalContext, error) {
+	service *common.Service, fs FS) (*GlobalContext, error) {
 	g := &GlobalContext{
 		initializers: extensionInitializers,
 		datasets:     make(map[string]*baseDataset),
 		service:      service,
+		catalog: catalog{
+			fields: map[sql.TableRef]*sql.Schema{},
+			stats:  map[sql.TableRef]*sql.Statistics{},
+		},
+		fs: fs,
 	}
 
 	schemas, err := getSchemas(ctx, db, nil)
@@ -155,13 +207,122 @@ func NewGlobalContext(ctx context.Context, db sql.Executor, extensionInitializer
 	// if one schema is dependent on another, it must be loaded after the other
 	// this is handled by the orderSchemas function
 	for _, schema := range orderSchemas(schemas) {
-		err := g.loadDataset(ctx, schema)
+		dbid := schema.DBID()
+		_, err := g.loadDataset(ctx, schema)
 		if err != nil {
-			return nil, fmt.Errorf("%w: schema (%s / %s / %s)", err, schema.Name, schema.DBID(), schema.Owner)
+			return nil, fmt.Errorf("%w: schema (%s / %s / %s)", err, schema.Name, dbid, schema.Owner)
+		}
+
+		// load up the table+col stats
+
+		schemaStatsBts, err := g.fs.ReadFile(dbid)
+		if err != nil {
+			if !errors.Is(err, os.ErrNotExist) {
+				return nil, err
+			}
+			g.service.Logger.S.Warnf("sql table statistics not found for %v, rebuilding", dbid)
+			err := g.buildStats(ctx, schema, db) // sets g.catalog.{fields,stats}
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			schemaStats, err := pg.DecStats(bytes.NewReader(schemaStatsBts))
+			if err != nil {
+				return nil, err
+			}
+
+			for tblRef, stats := range schemaStats {
+				g.service.Logger.S.Infof("loaded statistics for table %v", tblRef)
+				tbl, found := schema.FindTable(tblRef.Table)
+				if !found {
+					return nil, fmt.Errorf("table not found in loaded SQL stats: %v", tblRef.Table)
+				}
+				g.catalog.fields[tblRef] = sqlSchema(tbl, &tblRef)
+				g.catalog.stats[tblRef] = stats
+			}
 		}
 	}
 
+	if pgDB, is := db.(interface {
+		SetBaseStats(map[sql.TableRef]*sql.Statistics)
+	}); is {
+		pgDB.SetBaseStats(g.catalog.stats)
+	}
+
 	return g, nil
+}
+
+func (g *GlobalContext) DBStats() map[sql.TableRef]*sql.Statistics {
+	return g.catalog.stats
+}
+
+const statsRefreshModulus = 20
+
+// RebuildStatistics rebuilds column statistics for relations in schemas that
+// are scheduled for a refresh according to the current height, which is just a
+// monotonically increasing sequence for this purpose.  This also must persist
+// *all* statistics (or at least all statistics that were updated since the
+// previous call to this method) so that on restart the node's view of
+// statistics is consistent with other nodes, which would not be the case if a
+// full scan of every table were performed on node startup since the incremental
+// updates that occur at every block eventually create stale statistics.
+//
+// dang, the incremental updates occur on Precommit presently, so a rebuild that
+// reflects block X should not be followed by the incremental updates for block X.
+//   - opt: skip the incremental updates with a flag somehow, yuk
+//   - opt: do rebuild at the *beginning* of a block, before tx exc
+//   - opt: do rebuild outside of the consensus tx, after Commit, perhaps async/background with next block able to wait on it
+func (g *GlobalContext) RebuildStatistics(ctx context.Context, height int64, db sql.Executor) error {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+
+	// schemas, err := getSchemas(ctx, db, nil) // from disk, then g.loadDataset
+	for _, pair /*dbid, dataset*/ := range order.OrderMap(g.datasets) { // for loaded datasets
+		dbid, dataset := pair.Key, pair.Value
+		schema := dataset.schema
+
+		if !dataset.dirty {
+			g.service.Logger.S.Infof("Skipping rebuild of stats for unchanged dataset %s (%s), mod %d",
+				schema.Name, dbid, dataset.mod)
+			continue
+		}
+
+		// rebuild is periodic based on dbid
+		//  identity: (a + b) mod n = [(a mod n) + (b mod n)] mod n
+		if ((dataset.mod + (height % statsRefreshModulus)) % statsRefreshModulus) != 0 {
+			g.service.Logger.S.Infof("Skipping rebuild of stats for changed dataset %s (%s), mod %d",
+				schema.Name, dbid, dataset.mod)
+			// But store it since it has updates
+			schemaStats := g.extractStats(schema)
+			if err := g.storeStats(dbid, schemaStats); err != nil {
+				g.service.Logger.S.Errorf("storing schema stats (%d) failed: %v", dbid, err)
+			}
+			continue
+		}
+
+		g.service.Logger.S.Infof("Refreshing table statistics for database %s (%s), mod %d",
+			schema.Name, dbid, dataset.mod)
+		if err := g.buildStats(ctx, schema, db); err != nil {
+			return err
+		}
+		dataset.dirty = false
+	}
+
+	return nil
+}
+
+func (g *GlobalContext) extractStats(schema *types.Schema) map[sql.TableRef]*sql.Statistics {
+	schemaStats := make(map[sql.TableRef]*sql.Statistics, len(schema.Tables))
+	dbid := schema.DBID()
+	pgSchema := dbidSchema(dbid)
+	for _, table := range schema.Tables {
+		tableRef := sql.TableRef{
+			Namespace: pgSchema,
+			Table:     table.Name,
+		}
+		schemaStats[tableRef] = g.catalog.stats[tableRef]
+	}
+	return schemaStats
 }
 
 // Reload is used to reload the global context based on the current state of the database.
@@ -176,8 +337,11 @@ func (g *GlobalContext) Reload(ctx context.Context, db sql.Executor) error {
 	}
 
 	for _, schema := range orderSchemas(schemas) {
-		err := g.loadDataset(ctx, schema)
+		_, err := g.loadDataset(ctx, schema)
 		if err != nil {
+			return err
+		}
+		if err = g.buildStats(ctx, schema, db); err != nil {
 			return err
 		}
 	}
@@ -197,20 +361,25 @@ func (g *GlobalContext) CreateDataset(ctx context.Context, tx sql.DB, schema *ty
 	}
 	schema.Owner = txdata.Signer
 
-	err = g.loadDataset(ctx, schema)
+	_, err = g.loadDataset(ctx, schema)
 	if err != nil {
 		return err
 	}
+
+	defer func() {
+		if err != nil {
+			g.unloadDataset(schema.DBID())
+		}
+	}()
 
 	// it is critical that the schema is loaded before being created.
 	// the engine will not be able to parse the schema if it is not loaded.
 	err = createSchema(ctx, tx, schema, txdata.TxID)
 	if err != nil {
-		g.unloadDataset(schema.DBID())
 		return err
 	}
 
-	return nil
+	return g.buildStats(ctx, schema, tx)
 }
 
 // DeleteDataset deletes a dataset.
@@ -264,6 +433,7 @@ func (g *GlobalContext) Procedure(ctx context.Context, tx sql.DB, options *commo
 		TxID:      options.TxID,
 		Height:    options.Height,
 		// starting with stack depth 0, increment in each action call
+		GasLimit: 10000000,
 	}
 
 	tx2, err := tx.BeginTx(ctx)
@@ -277,7 +447,7 @@ func (g *GlobalContext) Procedure(ctx context.Context, tx sql.DB, options *commo
 		return nil, err
 	}
 
-	_, err = dataset.Call(procedureCtx, &common.App{
+	_, mutative, err := dataset.Call(procedureCtx, &common.App{
 		Service: g.service,
 		DB:      tx2,
 		Engine:  g,
@@ -286,7 +456,12 @@ func (g *GlobalContext) Procedure(ctx context.Context, tx sql.DB, options *commo
 		return nil, err
 	}
 
-	return procedureCtx.Result, tx2.Commit(ctx)
+	err = tx2.Commit(ctx)
+	if err == nil && mutative {
+		dataset.dirty = true
+	} // else it will rollback all changes
+
+	return procedureCtx.Result, err
 }
 
 // ListDatasets list datasets deployed by a specific caller.
@@ -381,18 +556,41 @@ func (g *GlobalContext) Execute(ctx context.Context, tx sql.DB, dbid, query stri
 		return nil, decorateExecuteErr(err, query)
 	}
 
+	if res.Mutative && result.Status.RowsAffected > 0 {
+		dataset.dirty = true
+	}
+
 	return result, nil
 }
 
 type dbQueryFn func(ctx context.Context, stmt string, args ...any) (*sql.ResultSet, error)
 
+func (g *GlobalContext) buildStats(ctx context.Context, schema *types.Schema, db sql.Executor) error {
+	dbid := schema.DBID()
+
+	schemaStats, err := buildStats(ctx, schema, db, &g.catalog)
+	if err != nil {
+		return err
+	}
+
+	return g.storeStats(dbid, schemaStats)
+}
+
+func (g *GlobalContext) storeStats(dbid string, schemaStats map[sql.TableRef]*sql.Statistics) error {
+	var buf bytes.Buffer
+	if err := pg.EncStats(&buf, schemaStats); err != nil {
+		return err
+	}
+	return g.fs.WriteFile(dbid, buf.Bytes())
+}
+
 // loadDataset loads a dataset into the global context.
 // It does not create the dataset in the datastore.
-func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) error {
+func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) (*baseDataset, error) { //nolint:unparam
 	dbid := schema.DBID()
 	_, ok := g.initializers[dbid]
 	if ok {
-		return fmt.Errorf("%w: %s", ErrDatasetExists, dbid)
+		return nil, fmt.Errorf("%w: %s", ErrDatasetExists, dbid)
 	}
 
 	datasetCtx := &baseDataset{
@@ -401,17 +599,19 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) e
 		actions:    make(map[string]*preparedAction),
 		procedures: make(map[string]*preparedProcedure),
 		global:     g,
+		mod:        bytesModN([]byte(dbid[1:]), statsRefreshModulus),
+		dirty:      true, // perform a rescan incase the node is loading an existing dataset
 	}
 
 	preparedActions, err := prepareActions(schema)
 	if err != nil {
-		return errors.Join(err, ErrInvalidSchema)
+		return nil, errors.Join(err, ErrInvalidSchema)
 	}
 
 	for _, prepared := range preparedActions {
 		_, ok := datasetCtx.actions[prepared.name]
 		if ok {
-			return fmt.Errorf(`%w: duplicate action name: "%s"`, ErrInvalidSchema, prepared.name)
+			return nil, fmt.Errorf(`%w: duplicate action name: "%s"`, ErrInvalidSchema, prepared.name)
 		}
 
 		datasetCtx.actions[prepared.name] = prepared
@@ -420,12 +620,12 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) e
 	for _, unprepared := range schema.Procedures {
 		prepared, err := prepareProcedure(unprepared)
 		if err != nil {
-			return errors.Join(err, ErrInvalidSchema)
+			return nil, errors.Join(err, ErrInvalidSchema)
 		}
 
 		_, ok := datasetCtx.procedures[prepared.name]
 		if ok {
-			return fmt.Errorf(`%w: duplicate procedure name: "%s"`, ErrInvalidSchema, prepared.name)
+			return nil, fmt.Errorf(`%w: duplicate procedure name: "%s"`, ErrInvalidSchema, prepared.name)
 		}
 
 		datasetCtx.procedures[prepared.name] = prepared
@@ -434,12 +634,12 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) e
 	for _, ext := range schema.Extensions {
 		_, ok := datasetCtx.extensions[ext.Alias]
 		if ok {
-			return fmt.Errorf(`%w duplicate namespace assignment: "%s"`, ErrInvalidSchema, ext.Alias)
+			return nil, fmt.Errorf(`%w duplicate namespace assignment: "%s"`, ErrInvalidSchema, ext.Alias)
 		}
 
 		initializer, ok := g.initializers[ext.Name]
 		if !ok {
-			return fmt.Errorf(`namespace "%s" not found`, ext.Name) // ErrMissingExtension?
+			return nil, fmt.Errorf(`namespace "%s" not found`, ext.Name) // ErrMissingExtension?
 		}
 
 		namespace, err := initializer(&precompiles.DeploymentContext{
@@ -447,7 +647,7 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) e
 			Schema: schema,
 		}, g.service, ext.CleanMap())
 		if err != nil {
-			return err
+			return nil, err
 		}
 
 		datasetCtx.extensions[ext.Alias] = namespace
@@ -458,7 +658,7 @@ func (g *GlobalContext) loadDataset(ctx context.Context, schema *types.Schema) e
 	}
 	g.datasets[dbid] = datasetCtx
 
-	return nil
+	return datasetCtx, nil
 }
 
 // unloadDataset unloads a dataset from the global context.

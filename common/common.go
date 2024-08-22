@@ -69,6 +69,8 @@ type Engine interface {
 	Execute(ctx context.Context, tx sql.DB, dbid, query string, values map[string]any) (*sql.ResultSet, error)
 	// Reload reloads the engine with the latest db state
 	Reload(ctx context.Context, tx sql.Executor) error
+
+	RebuildStatistics(ctx context.Context, height int64, tx sql.Executor) error
 }
 
 type SchemaGetter interface {

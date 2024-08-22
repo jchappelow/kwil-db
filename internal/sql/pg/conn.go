@@ -72,6 +72,8 @@ type ConnConfig struct {
 // building block or for testing individual systems outside of the context of a
 // session.
 type Pool struct {
+	cfg *PoolConfig
+
 	readers  *pgxpool.Pool
 	writer   *pgxpool.Pool // a pool for auto-reconnect on Acquire, but should only be one actual writer
 	reserved *pgxpool.Pool // reserved readers so validator operations (block proposal) aren't blocked by RPC readers
@@ -220,6 +222,7 @@ func NewPool(ctx context.Context, cfg *PoolConfig) (*Pool, error) {
 	oidTypes := oidTypesMap(writerConn.Conn().TypeMap())
 
 	pool := &Pool{
+		cfg:         cfg,
 		readers:     db,
 		writer:      writer,
 		reserved:    reserved,

@@ -78,6 +78,11 @@ var defaultSchemaFilter = func(schema string) bool {
 	return strings.HasPrefix(schema, DefaultSchemaFilterPrefix)
 }
 
+var (
+	dbMtx       sync.Mutex
+	dbInstances = map[string]bool{}
+)
+
 // [dev note] Transaction sequencing flow:
 // - when ready to commit a tx, increment (UPDATE) the seq int8 in kwild_internal.sentry table
 // - request from the repl monitor a promise for the commit ID for that seq
@@ -101,6 +106,16 @@ var defaultSchemaFilter = func(schema string) bool {
 // database. Transactions that use the Precommit method update an internal table
 // used to sequence transactions.
 func NewDB(ctx context.Context, cfg *DBConfig) (*DB, error) {
+	dbMtx.Lock()
+	already := dbInstances[cfg.PoolConfig.DBName]
+	if !already {
+		dbInstances[cfg.PoolConfig.DBName] = true
+	}
+	dbMtx.Unlock()
+	if already {
+		return nil, fmt.Errorf("existing pg.DB instance for %v", cfg.PoolConfig.DBName)
+	}
+
 	// Create the connection pool.
 	pool, err := NewPool(ctx, &cfg.PoolConfig)
 	if err != nil {
@@ -228,9 +243,18 @@ func NewDB(ctx context.Context, cfg *DBConfig) (*DB, error) {
 	return db, nil
 }
 
+func (db *DB) SetBaseStats(stats map[sql.TableRef]*sql.Statistics) {
+	// This is quick and dirty. There may be races on both the map and stats fields!
+	db.repl.changesetWriter.stats = stats
+}
+
 // Close shuts down the Kwil DB. This stops all connections and the WAL data
 // receiver.
 func (db *DB) Close() error {
+	dbMtx.Lock()
+	delete(dbInstances, db.pool.cfg.DBName)
+	dbMtx.Unlock()
+
 	db.cancel(nil)
 	db.repl.stop()
 	return db.pool.Close()

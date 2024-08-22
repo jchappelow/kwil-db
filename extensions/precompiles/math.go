@@ -37,7 +37,12 @@ func InitializeMath(ctx *DeploymentContext, service *common.Service, metadata ma
 	return &MathExtension{roundUp: roundUp}, nil
 }
 
-func (e *MathExtension) Call(ctx *ProcedureContext, app *common.App, method string, inputs []any) ([]any, error) {
+func (e *MathExtension) Call(ctx *ProcedureContext, app *common.App, method string, inputs []any) ([]any, bool, error) {
+	res, err := e.call(ctx, app, method, inputs)
+	return res, false, err
+}
+
+func (e *MathExtension) call(ctx *ProcedureContext, app *common.App, method string, inputs []any) ([]any, error) {
 	switch method {
 	case "add":
 		return e.add(inputs...)

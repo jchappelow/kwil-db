@@ -47,15 +47,18 @@ type StateSyncModule interface {
 // and managing a mempool
 type TxApp interface {
 	AccountInfo(ctx context.Context, db sql.DB, acctID []byte, getUnconfirmed bool) (balance *big.Int, nonce int64, err error)
-	ApplyMempool(ctx *common.TxContext, db sql.DB, tx *transactions.Transaction) error
-	Begin(ctx context.Context, height int64) error
-	Commit(ctx context.Context)
+	ApplyMempool(ctx *common.TxContext, db sql.DB, tx *transactions.Transaction) error // from CheckTx
+
+	Begin(ctx context.Context, height int64, db sql.DB) error
 	Execute(ctx txapp.TxContext, db sql.DB, tx *transactions.Transaction) *txapp.TxResponse
 	Finalize(ctx context.Context, db sql.DB, block *common.BlockContext) (finalValidators []*types.Validator, approvedJoins, expiredJoins [][]byte, err error)
+	Commit(ctx context.Context)
+
 	GenesisInit(ctx context.Context, db sql.DB, validators []*types.Validator, genesisAccounts []*types.Account, initialHeight int64, chain *common.ChainContext) error
-	GetValidators(ctx context.Context, db sql.DB) ([]*types.Validator, error)
-	ProposerTxs(ctx context.Context, db sql.DB, txNonce uint64, maxTxsSize int64, block *common.BlockContext) ([][]byte, error)
 	Reload(ctx context.Context, db sql.DB) error
+
+	ProposerTxs(ctx context.Context, db sql.DB, txNonce uint64, maxTxsSize int64, block *common.BlockContext) ([][]byte, error)
+	GetValidators(ctx context.Context, db sql.DB) ([]*types.Validator, error)
 	UpdateValidator(ctx context.Context, db sql.DB, validator []byte, power int64) error
 	Price(ctx context.Context, db sql.DB, tx *transactions.Transaction, chainCtx *common.ChainContext) (*big.Int, error)
 }
