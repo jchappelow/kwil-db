@@ -387,11 +387,7 @@ func Test_Procedures(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			global, db, err := setup(t)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup(t, db)
+			global, db := setup(t)
 
 			ctx := context.Background()
 
@@ -657,11 +653,7 @@ func Test_ForeignProcedures(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			global, db, err := setup(t)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup(t, db)
+			global, db := setup(t)
 
 			ctx := context.Background()
 

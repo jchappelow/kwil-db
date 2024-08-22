@@ -576,11 +576,7 @@ func Test_Engine(t *testing.T) {
 				test.after = func(t *testing.T, global *execution.GlobalContext, tx sql.DB) {}
 			}
 
-			global, db, err := setup(t)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup(t, db)
+			global, db := setup(t)
 
 			ctx := context.Background()
 

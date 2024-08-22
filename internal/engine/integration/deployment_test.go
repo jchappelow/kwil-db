@@ -216,11 +216,7 @@ func Test_Deployment(t *testing.T) {
 				}`
 			}
 
-			global, db, err := setup(t)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer cleanup(t, db)
+			global, db := setup(t)
 
 			ctx := context.Background()
 

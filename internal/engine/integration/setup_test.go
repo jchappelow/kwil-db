@@ -6,8 +6,11 @@ package integration_test
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/kwilteam/kwil-db/common"
 	"github.com/kwilteam/kwil-db/core/log"
@@ -15,12 +18,11 @@ import (
 	"github.com/kwilteam/kwil-db/internal/conv"
 	"github.com/kwilteam/kwil-db/internal/engine/execution"
 	"github.com/kwilteam/kwil-db/internal/sql/pg"
-	"github.com/stretchr/testify/require"
 )
 
 func TestMain(m *testing.M) {
 	// pg.UseLogger(log.NewStdOut(log.InfoLevel)) // uncomment for debugging
-	m.Run()
+	os.Exit(m.Run())
 }
 
 // cleanup deletes all schemas and closes the database
@@ -28,12 +30,24 @@ func cleanup(t *testing.T, db *pg.DB) {
 	txCounter = 0 // reset the global tx counter, which is necessary to properly
 	// encapsulate each test and make their results independent of each other
 
+	defer db.Close()
+	rmDatasets(t, db)
+
 	db.AutoCommit(true)
 	defer db.AutoCommit(false)
-	defer db.Close()
 	ctx := context.Background()
+	_, err := db.Execute(ctx, `DROP SCHEMA IF EXISTS kwild_internal CASCADE`)
+	require.NoError(t, err)
+}
 
-	_, err := db.Execute(ctx, `DO $$
+func rmDatasets(t *testing.T, db *pg.DB) {
+	ctx := context.Background()
+	tx, err := db.BeginTx(ctx)
+	require.NoError(t, err)
+
+	defer tx.Rollback(ctx)
+
+	_, err = tx.Execute(ctx, `DO $$
 	DECLARE
 		sn text;
 	BEGIN
@@ -44,12 +58,13 @@ func cleanup(t *testing.T, db *pg.DB) {
 	END $$;`)
 	require.NoError(t, err)
 
-	_, err = db.Execute(ctx, `DROP SCHEMA IF EXISTS kwild_internal CASCADE`)
-	require.NoError(t, err)
+	tx.Execute(ctx, `TRUNCATE kwild_internal.kwil_schemas CASCADE`)
+	tx.Execute(ctx, `TRUNCATE kwild_internal.procedures CASCADE`)
+	tx.Commit(ctx) // doesn't matter if err, just means tables didn't exist
 }
 
 // setup sets up the global context and registry for the tests
-func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB, err error) {
+func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB) {
 	ctx := context.Background()
 
 	cfg := &pg.DBConfig{
@@ -67,10 +82,15 @@ func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB, err error)
 			return strings.Contains(s, pg.DefaultSchemaFilterPrefix)
 		},
 	}
+	var err error
 	db, err = pg.NewDB(ctx, cfg)
 	if err != nil {
-		return nil, nil, err
+		t.Fatal(err)
 	}
+	rmDatasets(t, db)
+	t.Cleanup(func() {
+		cleanup(t, db)
+	})
 
 	tx, err := db.BeginTx(ctx)
 	require.NoError(t, err)
@@ -90,7 +110,7 @@ func setup(t *testing.T) (global *execution.GlobalContext, db *pg.DB, err error)
 	err = tx.Commit(ctx)
 	require.NoError(t, err)
 
-	return global, db, nil
+	return global, db
 }
 
 type mockFS struct{}

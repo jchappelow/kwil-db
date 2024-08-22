@@ -388,7 +388,7 @@ func newDB(readonly bool) *mockDB {
 		accessMode:    am,
 		dbs:           make(map[string][]byte),
 		executedStmts: make([]string, 0),
-		tblStatsRes:   nil,
+		tblStatsRes:   &sql.Statistics{},
 	}
 }
 
