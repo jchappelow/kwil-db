@@ -760,9 +760,13 @@ func upColStatsWithDelete(stats *sql.ColumnStatistics, old any) error {
 }
 
 func upColStatsWithUpdate(stats *sql.ColumnStatistics, old, up any) error { //nolint:unused
+	if IsUnchanged(up) {
+		return nil
+	}
 	if compareStatsVal(old, up) == 0 {
 		// With replica identity full, any update to the row creates a tuple
-		// update for the full row. Ignore unchanged columns.
+		// update for the full row. Ignore unchanged columns. IsUnchanged would
+		// catch this case first if used properly.
 		return nil
 	}
 	// update may or may not affect null count
