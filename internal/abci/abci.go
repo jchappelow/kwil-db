@@ -158,7 +158,9 @@ type AbciApp struct {
 
 	broadcastFn EventBroadcaster
 
-	// validatorAddressToPubKey is a map of validator addresses to their public keys
+	// validatorAddressToPubKey is a map of validator addresses to their public
+	// keys. This does NOT reflect the current validator set, which is consensus
+	// engine business, only the mapping from address to public key.
 	validatorAddressToPubKey map[string][]byte
 
 	// txCache stores hashes of all the transactions currently in the mempool.
@@ -320,10 +322,14 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		logger.Info("punish validator", zap.String("addr", addr))
 		// FORKSITE: could alter punishment system (consider misbehavior Type)
 
-		// This is why we need the addr=>pubkey map. Why, comet, why?
+		// CometBFT gives the address, not public key, so we have to remember them.
 		pubkey, ok := a.validatorAddressToPubKey[addr]
 		if !ok {
-			return nil, fmt.Errorf("unknown validator address %v", addr)
+			// It is possible or likely that a misbehaving validator will
+			// misbehave in consecutive blocks, so it should not be an error
+			// here since it could merely be a subsequent misbehavior if we have
+			// removed them from our app's map.
+			continue
 		}
 
 		const punishDelta = 1
@@ -340,6 +346,8 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		// only if the block has no transactions.
 		return nil, fmt.Errorf("failed to find proposer pubkey corresponding to address %v", addr)
 	}
+	// Note that in the !ok case, empty Txs is required, and the proposerPubKey
+	// may be empty!
 
 	res := &abciTypes.ResponseFinalizeBlock{}
 
@@ -422,11 +430,13 @@ func (a *AbciApp) FinalizeBlock(ctx context.Context, req *abciTypes.RequestFinal
 		if err != nil {
 			return nil, fmt.Errorf("failed to convert pubkey to address: %w", err)
 		}
-		if up.Power == 0 {
-			delete(a.validatorAddressToPubKey, addr)
-		} else {
+		if up.Power > 0 {
 			a.validatorAddressToPubKey[addr] = up.PubKey // there may be new validators we need to add
 		}
+		// NOTE: we now don't delete(a.validatorAddressToPubKey, addr) in the
+		// else condition since there is still need to determine the pubkey of a
+		// leaving validator in the next block. It would take an ungodly amount
+		// of validator set churn to eat any significant memory, so we keep them.
 
 		res.ValidatorUpdates[i] = abciTypes.Ed25519ValidatorUpdate(up.PubKey, up.Power)
 	}
@@ -1048,6 +1058,11 @@ func (a *AbciApp) ProcessProposal(ctx context.Context, req *abciTypes.RequestPro
 
 		a.log.Warn("proposer is not a validator and submitted a non-empty block, rejecting proposal", zap.String("proposer", proposerAddrToString(req.ProposerAddress)))
 		return &abciTypes.ResponseProcessProposal{Status: abciTypes.ResponseProcessProposal_REJECT}, nil
+		// IMPORTANT: this should never happen anymore as long as we do not
+		// delete validators from the map. However, we have changed the handling
+		// of misbehavior in FinalizeBlock for live networks. This means that
+		// updated nodes would in fact permit blocks with transaction in this
+		// case where they would be rejected here previously.
 	}
 
 	if err := a.validateProposalTransactions(ctx, req.Txs, proposerPubKey); err != nil {
