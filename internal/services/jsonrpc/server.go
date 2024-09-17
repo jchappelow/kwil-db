@@ -606,6 +606,10 @@ func (s *Server) processJSONRPCRequest(ctx context.Context, w http.ResponseWrite
 		case jsonrpc.ErrorInternal:
 			statusCode = http.StatusInternalServerError // 500
 		}
+
+		if jsonrpc.IsCallAuthError(resp.Error.Code) {
+			statusCode = http.StatusUnauthorized
+		}
 	}
 
 	// Write the response

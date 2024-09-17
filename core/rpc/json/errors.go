@@ -59,6 +59,19 @@ const (
 	ErrorNoQueryWithPrivateRPC ErrorCode = -1007
 )
 
+// IsCallAuthError returns true for ErrorCodes that indicate an issue with the
+// call method and the signature or challenge.
+func IsCallAuthError(code ErrorCode) bool {
+	switch code {
+	case ErrorCallChallengeNotFound, ErrorInvalidCallChallenge, ErrorCallChallengeExpired,
+		ErrorInvalidCallSignature, ErrorMismatchCallAuthType, ErrorTooFastChallengeReqs,
+		ErrorNoQueryWithPrivateRPC:
+		return true
+	default:
+		return false
+	}
+}
+
 // More detailed errors use a structured error type in the "data" field of the
 // responses "error" object. These may include a code field for domain-specific
 // codes.
