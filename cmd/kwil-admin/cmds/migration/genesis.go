@@ -57,10 +57,13 @@ func genesisStateCmd() *cobra.Command {
 				return display.PrintErr(cmd, fmt.Errorf("genesis state download is incompatible. Received version: %d, supported versions: [%d]", metadata.Version, migrations.MigrationVersion))
 			}
 
+			if metadata.MigrationState.Status == types.GenesisMigration {
+				return display.PrintErr(cmd, fmt.Errorf("genesis state command should only be used against the nodes from a network being migrated from"))
+			}
 			// If there is no active migration or if the migration has not started yet, return the migration state
 			// indicating that there is no genesis state to download.
 			if metadata.MigrationState.Status == types.NoActiveMigration ||
-				metadata.MigrationState.Status == types.MigrationNotStarted ||
+				metadata.MigrationState.Status == types.ActivationPeriod ||
 				metadata.GenesisInfo == nil || metadata.SnapshotMetadata == nil {
 				return display.PrintCmd(cmd, &MigrationState{
 					Info: metadata.MigrationState,
@@ -160,7 +163,7 @@ func (m *MigrationState) MarshalText() ([]byte, error) {
 		return []byte("No active migration found."), nil
 	}
 
-	if m.Info.Status == types.MigrationNotStarted {
+	if m.Info.Status == types.ActivationPeriod {
 		return []byte(fmt.Sprintf("No genesis state to download yet. Migration is set to start at block height: %d", m.Info.StartHeight)), nil
 	}
 

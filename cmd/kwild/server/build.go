@@ -173,7 +173,7 @@ func buildServer(d *coreDependencies, closers *closeFuncs) *Server {
 
 	// admin service and server
 	signer := buildSigner(d)
-	jsonAdminSvc := adminsvc.NewService(db, wrappedCmtClient, txApp, abciApp, p2p, migrator, signer, d.cfg,
+	jsonAdminSvc := adminsvc.NewService(db, wrappedCmtClient, txApp, abciApp, p2p, signer, d.cfg,
 		d.genesisCfg.ChainID, *d.log.Named("admin-json-svc"))
 	jsonRPCAdminServer := buildJRPCAdminServer(d)
 	jsonRPCAdminServer.RegisterSvc(jsonAdminSvc)
@@ -463,7 +463,7 @@ func buildMigrator(d *coreDependencies, db *pg.DB, txApp *txapp.TxApp) *migratio
 		failBuild(err, "failed to build snapshot store for migrations")
 	}
 
-	migrator, err := migrations.SetupMigrator(d.ctx, db, ss, txApp, migrationsDir, *d.log.Named("migrator"))
+	migrator, err := migrations.SetupMigrator(d.ctx, db, ss, txApp, migrationsDir, d.genesisCfg.ConsensusParams.Migration, *d.log.Named("migrator"))
 	if err != nil {
 		failBuild(err, "failed to build migrator")
 	}
